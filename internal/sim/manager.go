@@ -20,12 +20,13 @@ import (
 )
 
 type Manager struct {
-	mu        sync.RWMutex
-	store     store.Store
-	logger    *slog.Logger
-	engines   map[string]*Engine
-	scenarios map[string]scenarioEntry
-	metrics   runtimeMetrics
+	mu                   sync.RWMutex
+	store                store.Store
+	logger               *slog.Logger
+	engines              map[string]*Engine
+	scenarios            map[string]scenarioEntry
+	metrics              runtimeMetrics
+	snapshotWriteTimeout time.Duration
 }
 
 type RuntimeMetrics struct {
@@ -81,11 +82,16 @@ func nsToMS(ns int64) float64 {
 }
 
 func NewManager(st store.Store, logger *slog.Logger) *Manager {
+	return NewManagerWithSnapshotWriteTimeout(st, logger, 5*time.Second)
+}
+
+func NewManagerWithSnapshotWriteTimeout(st store.Store, logger *slog.Logger, snapshotWriteTimeout time.Duration) *Manager {
 	manager := &Manager{
-		store:     st,
-		logger:    logger,
-		engines:   map[string]*Engine{},
-		scenarios: map[string]scenarioEntry{},
+		store:                st,
+		logger:               logger,
+		engines:              map[string]*Engine{},
+		scenarios:            map[string]scenarioEntry{},
+		snapshotWriteTimeout: snapshotWriteTimeout,
 	}
 	manager.RegisterScenario("default", DefaultScenario(), "builtin")
 	return manager
@@ -130,7 +136,7 @@ func (m *Manager) CreateRunForOwner(ctx context.Context, ownerID, name string, s
 		UpdatedAt:    now,
 		SafetyNotice: model.SafetyNotice,
 	}
-	engine := newEngineWithMetrics(run, m.store, m.logger, &m.metrics)
+	engine := newEngineWithMetrics(run, m.store, m.logger, &m.metrics, m.snapshotWriteTimeout)
 	m.mu.Lock()
 	m.engines[run.ID] = engine
 	m.mu.Unlock()
@@ -360,12 +366,12 @@ func (m *Manager) requireEngine(ctx context.Context, id string) (*Engine, error)
 		return nil, errors.New("run engine not found for stopped run")
 	}
 	if frame, err := m.store.LatestSnapshot(ctx, run.ID); err == nil {
-		engine = newEngineFromSnapshotWithMetrics(run, m.store, m.logger, frame, &m.metrics)
+		engine = newEngineFromSnapshotWithMetrics(run, m.store, m.logger, frame, &m.metrics, m.snapshotWriteTimeout)
 		if m.logger != nil {
 			m.logger.Info("run restored from snapshot", "run_id", run.ID, "tick", frame.Tick)
 		}
 	} else {
-		engine = newEngineWithMetrics(run, m.store, m.logger, &m.metrics)
+		engine = newEngineWithMetrics(run, m.store, m.logger, &m.metrics, m.snapshotWriteTimeout)
 		if m.logger != nil && run.Restored {
 			m.logger.Warn("run restored without snapshot fallback", "run_id", run.ID, "error", err)
 		}
@@ -389,7 +395,9 @@ func (m *Manager) RuntimeMetrics() RuntimeMetrics {
 
 func (m *Manager) saveSnapshot(ctx context.Context, snapshot model.Snapshot) error {
 	start := time.Now()
-	err := m.store.SaveSnapshot(ctx, snapshot)
+	snapshotCtx, cancel := snapshotContext(ctx, m.snapshotWriteTimeout)
+	defer cancel()
+	err := m.store.SaveSnapshot(snapshotCtx, snapshot)
 	m.metrics.recordSnapshotWrite(time.Since(start), err)
 	return err
 }
@@ -839,53 +847,56 @@ func actionAllowed(allowed []string, action string) bool {
 }
 
 type Engine struct {
-	mu          sync.RWMutex
-	run         model.Run
-	store       store.Store
-	logger      *slog.Logger
-	metrics     *runtimeMetrics
-	rng         *rand.Rand
-	tick        int64
-	tracks      map[string]model.Track
-	contacts    []model.Contact
-	events      []model.SimEvent
-	subscribers map[chan model.Snapshot]struct{}
-	cancel      context.CancelFunc
+	mu                   sync.RWMutex
+	run                  model.Run
+	store                store.Store
+	logger               *slog.Logger
+	metrics              *runtimeMetrics
+	snapshotWriteTimeout time.Duration
+	rng                  *rand.Rand
+	tick                 int64
+	tracks               map[string]model.Track
+	contacts             []model.Contact
+	events               []model.SimEvent
+	subscribers          map[chan model.Snapshot]struct{}
+	cancel               context.CancelFunc
 }
 
 func NewEngine(run model.Run, st store.Store, logger *slog.Logger) *Engine {
-	return newEngineWithMetrics(run, st, logger, nil)
+	return newEngineWithMetrics(run, st, logger, nil, 5*time.Second)
 }
 
-func newEngineWithMetrics(run model.Run, st store.Store, logger *slog.Logger, metrics *runtimeMetrics) *Engine {
+func newEngineWithMetrics(run model.Run, st store.Store, logger *slog.Logger, metrics *runtimeMetrics, snapshotWriteTimeout time.Duration) *Engine {
 	engine := &Engine{
-		run:         run,
-		store:       st,
-		logger:      logger,
-		metrics:     metrics,
-		rng:         rand.New(rand.NewSource(run.Scenario.Seed)),
-		tracks:      map[string]model.Track{},
-		subscribers: map[chan model.Snapshot]struct{}{},
+		run:                  run,
+		store:                st,
+		logger:               logger,
+		metrics:              metrics,
+		snapshotWriteTimeout: snapshotWriteTimeout,
+		rng:                  rand.New(rand.NewSource(run.Scenario.Seed)),
+		tracks:               map[string]model.Track{},
+		subscribers:          map[chan model.Snapshot]struct{}{},
 	}
 	engine.seedTracks(time.Now().UTC())
 	return engine
 }
 
 func NewEngineFromSnapshot(run model.Run, st store.Store, logger *slog.Logger, frame model.SnapshotFrame) *Engine {
-	return newEngineFromSnapshotWithMetrics(run, st, logger, frame, nil)
+	return newEngineFromSnapshotWithMetrics(run, st, logger, frame, nil, 5*time.Second)
 }
 
-func newEngineFromSnapshotWithMetrics(run model.Run, st store.Store, logger *slog.Logger, frame model.SnapshotFrame, metrics *runtimeMetrics) *Engine {
+func newEngineFromSnapshotWithMetrics(run model.Run, st store.Store, logger *slog.Logger, frame model.SnapshotFrame, metrics *runtimeMetrics, snapshotWriteTimeout time.Duration) *Engine {
 	engine := &Engine{
-		run:         run,
-		store:       st,
-		logger:      logger,
-		metrics:     metrics,
-		rng:         rand.New(rand.NewSource(run.Scenario.Seed + frame.Tick)),
-		tick:        frame.Tick,
-		tracks:      map[string]model.Track{},
-		contacts:    append([]model.Contact(nil), frame.Contacts...),
-		subscribers: map[chan model.Snapshot]struct{}{},
+		run:                  run,
+		store:                st,
+		logger:               logger,
+		metrics:              metrics,
+		snapshotWriteTimeout: snapshotWriteTimeout,
+		rng:                  rand.New(rand.NewSource(run.Scenario.Seed + frame.Tick)),
+		tick:                 frame.Tick,
+		tracks:               map[string]model.Track{},
+		contacts:             append([]model.Contact(nil), frame.Contacts...),
+		subscribers:          map[chan model.Snapshot]struct{}{},
 	}
 	for _, track := range frame.Tracks {
 		engine.tracks[track.ID] = track
@@ -1020,13 +1031,22 @@ func (e *Engine) loop(ctx context.Context) {
 
 func (e *Engine) saveSnapshot(ctx context.Context, snapshot model.Snapshot) {
 	start := time.Now()
-	err := e.store.SaveSnapshot(ctx, snapshot)
+	snapshotCtx, cancel := snapshotContext(ctx, e.snapshotWriteTimeout)
+	defer cancel()
+	err := e.store.SaveSnapshot(snapshotCtx, snapshot)
 	if e.metrics != nil {
 		e.metrics.recordSnapshotWrite(time.Since(start), err)
 	}
 	if err != nil && e.logger != nil {
 		e.logger.Warn("snapshot persistence failed", "run_id", snapshot.RunID, "error", err)
 	}
+}
+
+func snapshotContext(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	if timeout <= 0 {
+		return parent, func() {}
+	}
+	return context.WithTimeout(parent, timeout)
 }
 
 func (e *Engine) seedTracks(now time.Time) {

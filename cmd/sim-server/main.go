@@ -31,15 +31,26 @@ func main() {
 			logger.Error("postgres unavailable", "error", err)
 			os.Exit(1)
 		}
+		status, err := pg.MigrationStatus(context.Background())
+		if err != nil {
+			logger.Error("postgres migration status unavailable", "error", err)
+			pg.Close()
+			os.Exit(1)
+		}
+		if err := status.Error(); err != nil {
+			logger.Error("postgres migrations required", "current_version", status.Current, "required_version", status.Required, "error", err)
+			pg.Close()
+			os.Exit(1)
+		}
 		defer pg.Close()
 		st = pg
-		logger.Info("using postgres/postgis store")
+		logger.Info("using postgres/postgis store", "migration_version", status.Current)
 	} else {
 		st = store.NewMemory()
 		logger.Warn("DATABASE_URL not set; using memory store for local simulation demo")
 	}
 
-	manager := sim.NewManager(st, logger)
+	manager := sim.NewManagerWithSnapshotWriteTimeout(st, logger, cfg.SnapshotWriteTimeout)
 	if count, err := manager.LoadScenarioDir(cfg.ScenarioDir); err != nil {
 		logger.Error("load scenarios failed", "dir", cfg.ScenarioDir, "error", err)
 		os.Exit(1)

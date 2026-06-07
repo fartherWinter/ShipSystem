@@ -35,6 +35,7 @@ type Config struct {
 	HTTPWriteTimeout      time.Duration
 	HTTPIdleTimeout       time.Duration
 	ShutdownTimeout       time.Duration
+	SnapshotWriteTimeout  time.Duration
 }
 
 func Default() Config {
@@ -52,6 +53,7 @@ func Default() Config {
 		HTTPWriteTimeout:      30 * time.Second,
 		HTTPIdleTimeout:       60 * time.Second,
 		ShutdownTimeout:       15 * time.Second,
+		SnapshotWriteTimeout:  5 * time.Second,
 	}
 }
 
@@ -92,6 +94,9 @@ func Load() (Config, error) {
 	if cfg.ShutdownTimeout, err = durationEnv("SHIP_SIM_SHUTDOWN_TIMEOUT", cfg.ShutdownTimeout); err != nil {
 		parseErrs = append(parseErrs, err.Error())
 	}
+	if cfg.SnapshotWriteTimeout, err = durationEnv("SHIP_SIM_SNAPSHOT_WRITE_TIMEOUT", cfg.SnapshotWriteTimeout); err != nil {
+		parseErrs = append(parseErrs, err.Error())
+	}
 	if len(parseErrs) > 0 {
 		return cfg, errors.New(strings.Join(parseErrs, "; "))
 	}
@@ -126,6 +131,9 @@ func (c Config) Validate() error {
 	}
 	if c.ShutdownTimeout <= 0 {
 		details = append(details, "SHIP_SIM_SHUTDOWN_TIMEOUT must be greater than zero")
+	}
+	if c.SnapshotWriteTimeout <= 0 {
+		details = append(details, "SHIP_SIM_SNAPSHOT_WRITE_TIMEOUT must be greater than zero")
 	}
 	switch c.AuthMode {
 	case AuthOff:

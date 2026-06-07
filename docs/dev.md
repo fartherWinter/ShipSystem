@@ -58,7 +58,17 @@ psql $env:SHIP_SIM_DATABASE_URL -f migrations/002_snapshot_frames.sql
 go run ./cmd/sim-server
 ```
 
+PostgreSQL mode has a startup migration gate. The app requires `schema_migrations.name='ship_sim'` to be at the current version before it starts HTTP. Empty databases and v1 databases fail clearly instead of running in a half-migrated state.
+
 Do not run destructive database operations against shared or production data without first taking a backup or using a documented preview/dry-run path. Retention pruning supports a preview API; use it before manual pruning.
+
+Run the optional Postgres integration test against an isolated Docker database:
+
+```powershell
+.\scripts\test-postgres.ps1
+```
+
+The script uses the `shipsim-test` Compose project and removes only that test project's containers and volume by default. See `docs/database.md` for details.
 
 ## Unified Commands
 
@@ -70,6 +80,7 @@ make test
 make build
 make lint
 make docker-build
+make postgres-test
 ```
 
 The targets expand to the same underlying commands:
@@ -78,6 +89,7 @@ The targets expand to the same underlying commands:
 - `build`: Go backend build and `npm run build` in `web/`.
 - `lint`: `go vet ./...` and frontend type checking.
 - `docker-build`: local Docker image build, default tag `shipsim:local`.
+- `postgres-test`: isolated PostGIS store contract test using `docker-compose.test.yml`.
 - `dev`: backend and Vite frontend development servers.
 
 On systems without `make`, run the underlying Go, npm, and Docker commands directly.

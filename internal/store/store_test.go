@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -27,6 +28,48 @@ func TestPostgresStoreRunEventAndTrackPoints(t *testing.T) {
 	testStoreContract(t, st)
 }
 
+func TestMigrationStatusRequiresCurrentVersion(t *testing.T) {
+	tests := []struct {
+		name    string
+		current int
+		wantErr bool
+	}{
+		{name: "empty database", current: 0, wantErr: true},
+		{name: "v1 database", current: 1, wantErr: true},
+		{name: "v2 database", current: CurrentMigrationVersion, wantErr: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			status := MigrationStatus{Current: tt.current, Required: CurrentMigrationVersion}
+			err := status.Error()
+			if tt.wantErr && err == nil {
+				t.Fatalf("expected migration error for version %d", tt.current)
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("expected current migration to pass: %v", err)
+			}
+			if status.Ready() == tt.wantErr {
+				t.Fatalf("unexpected ready state for version %d", tt.current)
+			}
+		})
+	}
+}
+
+func TestStatementTimeoutFromContext(t *testing.T) {
+	if _, ok := statementTimeoutFromContext(context.Background()); ok {
+		t.Fatal("expected no statement timeout without context deadline")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	value, ok := statementTimeoutFromContext(ctx)
+	if !ok {
+		t.Fatal("expected statement timeout with context deadline")
+	}
+	if value == "" || !strings.HasSuffix(value, "ms") {
+		t.Fatalf("expected millisecond statement timeout, got %q", value)
+	}
+}
+
 func testStoreContract(t *testing.T, st Store) {
 	t.Helper()
 	defer st.Close()
@@ -37,6 +80,9 @@ func testStoreContract(t *testing.T, st Store) {
 	}
 	if status.Store == "" {
 		t.Fatal("expected store name")
+	}
+	if status.Store == "postgres" && status.MigrationVersion < CurrentMigrationVersion {
+		t.Fatalf("expected postgres migration version >= %d, got %d", CurrentMigrationVersion, status.MigrationVersion)
 	}
 	runID := uuid.NewString()
 	trackID := uuid.NewString()

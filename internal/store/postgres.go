@@ -19,6 +19,24 @@ type Postgres struct {
 	pool *pgxpool.Pool
 }
 
+const CurrentMigrationVersion = 2
+
+type MigrationStatus struct {
+	Current  int
+	Required int
+}
+
+func (m MigrationStatus) Ready() bool {
+	return m.Current >= m.Required
+}
+
+func (m MigrationStatus) Error() error {
+	if m.Ready() {
+		return nil
+	}
+	return fmt.Errorf("database migrations are not current: current version %d, required version %d; apply migrations/001_init.sql through migrations/002_snapshot_frames.sql before starting PostgreSQL mode", m.Current, m.Required)
+}
+
 func NewPostgres(ctx context.Context, dsn string) (*Postgres, error) {
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
@@ -39,15 +57,54 @@ func (p *Postgres) Ready(ctx context.Context) (model.StoreStatus, error) {
 	if err := p.pool.Ping(ctx); err != nil {
 		return model.StoreStatus{}, err
 	}
+	status, err := p.MigrationStatus(ctx)
+	if err != nil {
+		return model.StoreStatus{}, err
+	}
+	if err := status.Error(); err != nil {
+		return model.StoreStatus{}, err
+	}
+	return model.StoreStatus{Store: p.Name(), MigrationVersion: status.Current}, nil
+}
+
+func (p *Postgres) MigrationStatus(ctx context.Context) (MigrationStatus, error) {
+	version, err := p.migrationVersion(ctx)
+	if err != nil {
+		return MigrationStatus{}, err
+	}
+	return MigrationStatus{Current: version, Required: CurrentMigrationVersion}, nil
+}
+
+func (p *Postgres) RequireMigrations(ctx context.Context) error {
+	status, err := p.MigrationStatus(ctx)
+	if err != nil {
+		return err
+	}
+	return status.Error()
+}
+
+func (p *Postgres) migrationVersion(ctx context.Context) (int, error) {
+	var hasTable bool
+	if err := p.pool.QueryRow(ctx, `
+SELECT EXISTS (
+	SELECT 1
+	FROM information_schema.tables
+	WHERE table_schema = current_schema()
+		AND table_name = 'schema_migrations'
+)`).Scan(&hasTable); err != nil {
+		return 0, fmt.Errorf("migration status: %w", err)
+	}
+	if !hasTable {
+		return 0, nil
+	}
 	var version int
-	err := p.pool.QueryRow(ctx, `
+	if err := p.pool.QueryRow(ctx, `
 SELECT COALESCE(MAX(version),0)
 FROM schema_migrations
-WHERE name='ship_sim'`).Scan(&version)
-	if err != nil {
-		return model.StoreStatus{}, fmt.Errorf("migration status: %w", err)
+WHERE name='ship_sim'`).Scan(&version); err != nil {
+		return 0, fmt.Errorf("migration status: %w", err)
 	}
-	return model.StoreStatus{Store: p.Name(), MigrationVersion: version}, nil
+	return version, nil
 }
 
 func (p *Postgres) SaveRun(ctx context.Context, run model.Run) error {
@@ -287,6 +344,11 @@ func (p *Postgres) SaveSnapshot(ctx context.Context, snapshot model.Snapshot) er
 		return err
 	}
 	defer tx.Rollback(ctx)
+	if statementTimeout, ok := statementTimeoutFromContext(ctx); ok {
+		if _, err = tx.Exec(ctx, `SELECT set_config('statement_timeout', $1, true)`, statementTimeout); err != nil {
+			return err
+		}
+	}
 	_, err = tx.Exec(ctx, `
 INSERT INTO sim_snapshots (run_id, tick, sampled_at, status, tracks, contacts, notice, snapshot_hz)
 VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
@@ -294,20 +356,18 @@ VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
 	if err != nil {
 		return err
 	}
+	var batch pgx.Batch
 	for _, contact := range frame.Contacts {
-		_, err = tx.Exec(ctx, `
+		batch.Queue(`
 INSERT INTO contacts_raw (run_id, sensor_id, contact_id, observed_at, position, velocity_x, velocity_y, velocity_z, confidence, kind)
 VALUES ($1,$2,$3,$4,ST_SetSRID(ST_MakePoint($5,$6,$7),4326),$8,$9,$10,$11,$12)`,
 			frame.RunID, contact.SensorID, contact.ID, contact.Timestamp,
 			contact.Position.Lon, contact.Position.Lat, contact.Position.Alt,
 			contact.Velocity.Lon, contact.Velocity.Lat, contact.Velocity.Alt,
 			contact.Confidence, contact.Kind)
-		if err != nil {
-			return err
-		}
 	}
 	for _, track := range frame.Tracks {
-		_, err = tx.Exec(ctx, `
+		batch.Queue(`
 INSERT INTO tracks (id, run_id, track_no, kind, threat_level, latest_position, confidence, status, last_seen_at)
 VALUES ($1,$2,$3,$4,$5,ST_SetSRID(ST_MakePoint($6,$7,$8),4326),$9,$10,$11)
 ON CONFLICT (id) DO UPDATE SET
@@ -319,15 +379,15 @@ ON CONFLICT (id) DO UPDATE SET
 			track.ID, frame.RunID, track.TrackNo, track.Kind, track.Threat,
 			track.Position.Lon, track.Position.Lat, track.Position.Alt,
 			track.Confidence, track.Status, track.UpdatedAt)
-		if err != nil {
-			return err
-		}
-		_, err = tx.Exec(ctx, `
+		batch.Queue(`
 INSERT INTO track_points (run_id, track_id, sampled_at, position, speed, heading, confidence)
 VALUES ($1,$2,$3,ST_SetSRID(ST_MakePoint($4,$5,$6),4326),$7,$8,$9)`,
 			frame.RunID, track.ID, track.UpdatedAt, track.Position.Lon, track.Position.Lat, track.Position.Alt,
 			abs(track.Velocity.Lon)+abs(track.Velocity.Lat), 0.0, track.Confidence)
-		if err != nil {
+	}
+	if batch.Len() > 0 {
+		results := tx.SendBatch(ctx, &batch)
+		if err := results.Close(); err != nil {
 			return err
 		}
 	}
@@ -595,7 +655,7 @@ WHERE (
 		var excess int64
 		if err := p.pool.QueryRow(ctx, `
 WITH ranked AS (
-	SELECT row_number() OVER (PARTITION BY run_id ORDER BY sampled_at DESC, id DESC) AS rn
+	SELECT row_number() OVER (PARTITION BY p.run_id ORDER BY p.sampled_at DESC, p.id DESC) AS rn
 	FROM track_points p
 	JOIN sim_runs r ON r.id=p.run_id
 	WHERE ($2 = '' OR r.owner_id = $2)
@@ -711,6 +771,22 @@ func nullableString(value string) *string {
 		return nil
 	}
 	return &value
+}
+
+func statementTimeoutFromContext(ctx context.Context) (string, bool) {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return "", false
+	}
+	remaining := time.Until(deadline)
+	if remaining <= 0 {
+		remaining = time.Millisecond
+	}
+	ms := remaining.Milliseconds()
+	if ms < 1 {
+		ms = 1
+	}
+	return fmt.Sprintf("%dms", ms), true
 }
 
 func scanSnapshotFrame(scan func(dest ...any) error) (model.SnapshotFrame, error) {

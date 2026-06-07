@@ -32,6 +32,7 @@ func TestDurationEnvOverrides(t *testing.T) {
 	t.Setenv("SHIP_SIM_HTTP_WRITE_TIMEOUT", "11s")
 	t.Setenv("SHIP_SIM_HTTP_IDLE_TIMEOUT", "45s")
 	t.Setenv("SHIP_SIM_SHUTDOWN_TIMEOUT", "20s")
+	t.Setenv("SHIP_SIM_SNAPSHOT_WRITE_TIMEOUT", "4s")
 	cfg, err := Load()
 	if err != nil {
 		t.Fatalf("load config: %v", err)
@@ -40,7 +41,8 @@ func TestDurationEnvOverrides(t *testing.T) {
 		cfg.HTTPReadHeaderTimeout != 3*time.Second ||
 		cfg.HTTPWriteTimeout != 11*time.Second ||
 		cfg.HTTPIdleTimeout != 45*time.Second ||
-		cfg.ShutdownTimeout != 20*time.Second {
+		cfg.ShutdownTimeout != 20*time.Second ||
+		cfg.SnapshotWriteTimeout != 4*time.Second {
 		t.Fatalf("unexpected duration config: %+v", cfg)
 	}
 }
@@ -57,5 +59,10 @@ func TestTimeoutsMustBePositive(t *testing.T) {
 	cfg.ShutdownTimeout = 0
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("expected zero shutdown timeout to fail")
+	}
+	cfg = Default()
+	cfg.SnapshotWriteTimeout = 0
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected zero snapshot write timeout to fail")
 	}
 }

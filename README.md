@@ -54,6 +54,11 @@ psql $env:DATABASE_URL -f migrations/001_init.sql
 psql $env:DATABASE_URL -f migrations/002_snapshot_frames.sql
 ```
 
+PostgreSQL mode has a startup migration gate. The app requires
+`schema_migrations.name='ship_sim'` to be at the current version before HTTP
+startup. Empty databases are treated as version `0`; databases with only
+`001_init.sql` are version `1` and must apply `002_snapshot_frames.sql`.
+
 Production mode requires authentication:
 
 ```powershell
@@ -102,6 +107,15 @@ The Compose file runs the app and PostGIS. The migrations are mounted into
 `/docker-entrypoint-initdb.d` and are applied when the database volume is first
 created. For an existing database, apply `migrations/001_init.sql` and then
 `migrations/002_snapshot_frames.sql` manually.
+
+Run the optional Postgres integration test against an isolated test database:
+
+```powershell
+.\scripts\test-postgres.ps1
+```
+
+See `docs/database.md` for database migration, backup/preview, and snapshot
+write reliability guidance.
 
 ## API Quick Start
 

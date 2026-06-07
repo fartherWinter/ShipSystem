@@ -41,8 +41,10 @@ The server applies these defaults:
 - `SHIP_SIM_HTTP_WRITE_TIMEOUT=30s`
 - `SHIP_SIM_HTTP_IDLE_TIMEOUT=60s`
 - `SHIP_SIM_SHUTDOWN_TIMEOUT=15s`
+- `SHIP_SIM_SNAPSHOT_WRITE_TIMEOUT=5s`
 
 Use Go duration syntax such as `500ms`, `10s`, or `2m`. Set longer write timeouts only when reports or replay APIs need more time under known load.
+`SHIP_SIM_SNAPSHOT_WRITE_TIMEOUT` bounds replay/audit snapshot persistence. PostgreSQL snapshot transactions derive their local statement timeout from this request deadline. Increase it only after measuring database write latency and capacity.
 
 ## Graceful Shutdown
 
@@ -59,7 +61,11 @@ If final persistence fails, the process logs the run id and exits non-zero. This
 
 ## Database Safety
 
-Apply migrations before using PostgreSQL mode. Do not run destructive database operations against shared or production data without a backup or a documented preview. Retention pruning supports `GET /api/retention/preview`; use it before `POST /api/retention/prune`.
+Apply migrations before using PostgreSQL mode. The app refuses to start with PostgreSQL unless `schema_migrations` reports the current required version. Empty databases are treated as version `0`, and a database with only `migrations/001_init.sql` is version `1`.
+
+Do not run destructive database operations against shared or production data without a backup or a documented preview. Retention pruning supports `GET /api/retention/preview`; use it before `POST /api/retention/prune`.
+
+See `docs/database.md` for migration gate behavior, test database workflow, and snapshot write reliability notes.
 
 ## Compose Checks
 
