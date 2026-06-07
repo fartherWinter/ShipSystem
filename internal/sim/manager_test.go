@@ -77,6 +77,37 @@ func TestStoppedRunCannotBeRestarted(t *testing.T) {
 	}
 }
 
+func TestShutdownStopsRunningRunsAndSavesFinalSnapshot(t *testing.T) {
+	st := store.NewMemory()
+	manager := NewManager(st, slog.Default())
+	run, err := manager.CreateRun(context.Background(), "shutdown", DefaultScenario())
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if _, err := manager.Start(context.Background(), run.ID); err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+	time.Sleep(150 * time.Millisecond)
+
+	if err := manager.Shutdown(context.Background()); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+	stopped, err := manager.GetRun(context.Background(), run.ID)
+	if err != nil {
+		t.Fatalf("get stopped run: %v", err)
+	}
+	if stopped.Status != model.RunStopped || stopped.StoppedAt.IsZero() {
+		t.Fatalf("expected stopped run with stopped_at, got %+v", stopped)
+	}
+	snapshotRange, ok, err := manager.SnapshotRange(context.Background(), run.ID)
+	if err != nil {
+		t.Fatalf("snapshot range: %v", err)
+	}
+	if !ok || snapshotRange.Count == 0 {
+		t.Fatalf("expected final snapshot, got ok=%v range=%+v", ok, snapshotRange)
+	}
+}
+
 func TestRestoredRunningRunReturnsPaused(t *testing.T) {
 	st := store.NewMemory()
 	now := time.Now().UTC()

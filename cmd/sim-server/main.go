@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"shipsim/internal/api"
@@ -66,13 +68,48 @@ func main() {
 	httpServer := &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           server.Routes(),
-		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       cfg.HTTPReadTimeout,
+		ReadHeaderTimeout: cfg.HTTPReadHeaderTimeout,
+		WriteTimeout:      cfg.HTTPWriteTimeout,
+		IdleTimeout:       cfg.HTTPIdleTimeout,
 	}
 
-	logger.Info("ship simulation server starting", "addr", cfg.Addr, "auth_mode", cfg.AuthMode, "env", cfg.Environment)
-	if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		logger.Error("server stopped", "error", err)
-		os.Exit(1)
+	serverErr := make(chan error, 1)
+	go func() {
+		logger.Info("ship simulation server starting", "addr", cfg.Addr, "auth_mode", cfg.AuthMode, "env", cfg.Environment)
+		serverErr <- httpServer.ListenAndServe()
+	}()
+
+	signalCtx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
+
+	shutdownCompleted := false
+	select {
+	case err := <-serverErr:
+		if err != nil && err != http.ErrServerClosed {
+			logger.Error("server stopped", "error", err)
+			os.Exit(1)
+		}
+	case <-signalCtx.Done():
+		logger.Info("shutdown signal received", "timeout", cfg.ShutdownTimeout.String())
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
+		defer cancel()
+		if err := httpServer.Shutdown(shutdownCtx); err != nil {
+			logger.Error("http shutdown failed", "error", err)
+			_ = httpServer.Close()
+		}
+		if err := manager.Shutdown(shutdownCtx); err != nil {
+			logger.Error("simulation shutdown completed with errors", "error", err)
+			os.Exit(1)
+		}
+		shutdownCompleted = true
+		logger.Info("ship simulation server stopped")
+	}
+	if !shutdownCompleted {
+		if err := manager.Shutdown(context.Background()); err != nil {
+			logger.Error("simulation shutdown completed with errors", "error", err)
+			os.Exit(1)
+		}
 	}
 }
 

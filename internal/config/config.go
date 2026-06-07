@@ -5,6 +5,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const (
@@ -17,30 +18,40 @@ const (
 )
 
 type Config struct {
-	Addr                 string
-	DatabaseURL          string
-	AllowedOrigins       []string
-	Environment          string
-	AuthMode             string
-	AuthToken            string
-	AuthUserHeader       string
-	ScenarioDir          string
-	StaticDir            string
-	RequestBodyLimit     int64
-	RetentionDays        int
-	MaxTrackPointsPerRun int
+	Addr                  string
+	DatabaseURL           string
+	AllowedOrigins        []string
+	Environment           string
+	AuthMode              string
+	AuthToken             string
+	AuthUserHeader        string
+	ScenarioDir           string
+	StaticDir             string
+	RequestBodyLimit      int64
+	RetentionDays         int
+	MaxTrackPointsPerRun  int
+	HTTPReadTimeout       time.Duration
+	HTTPReadHeaderTimeout time.Duration
+	HTTPWriteTimeout      time.Duration
+	HTTPIdleTimeout       time.Duration
+	ShutdownTimeout       time.Duration
 }
 
 func Default() Config {
 	return Config{
-		Addr:                 DefaultAddr,
-		Environment:          EnvDev,
-		AuthMode:             AuthOff,
-		AuthUserHeader:       "X-Forwarded-User",
-		ScenarioDir:          "scenarios",
-		RequestBodyLimit:     1 << 20,
-		RetentionDays:        0,
-		MaxTrackPointsPerRun: 0,
+		Addr:                  DefaultAddr,
+		Environment:           EnvDev,
+		AuthMode:              AuthOff,
+		AuthUserHeader:        "X-Forwarded-User",
+		ScenarioDir:           "scenarios",
+		RequestBodyLimit:      1 << 20,
+		RetentionDays:         0,
+		MaxTrackPointsPerRun:  0,
+		HTTPReadTimeout:       10 * time.Second,
+		HTTPReadHeaderTimeout: 5 * time.Second,
+		HTTPWriteTimeout:      30 * time.Second,
+		HTTPIdleTimeout:       60 * time.Second,
+		ShutdownTimeout:       15 * time.Second,
 	}
 }
 
@@ -66,6 +77,21 @@ func Load() (Config, error) {
 	if cfg.MaxTrackPointsPerRun, err = intEnv("SHIP_SIM_MAX_TRACK_POINTS_PER_RUN", cfg.MaxTrackPointsPerRun); err != nil {
 		parseErrs = append(parseErrs, err.Error())
 	}
+	if cfg.HTTPReadTimeout, err = durationEnv("SHIP_SIM_HTTP_READ_TIMEOUT", cfg.HTTPReadTimeout); err != nil {
+		parseErrs = append(parseErrs, err.Error())
+	}
+	if cfg.HTTPReadHeaderTimeout, err = durationEnv("SHIP_SIM_HTTP_READ_HEADER_TIMEOUT", cfg.HTTPReadHeaderTimeout); err != nil {
+		parseErrs = append(parseErrs, err.Error())
+	}
+	if cfg.HTTPWriteTimeout, err = durationEnv("SHIP_SIM_HTTP_WRITE_TIMEOUT", cfg.HTTPWriteTimeout); err != nil {
+		parseErrs = append(parseErrs, err.Error())
+	}
+	if cfg.HTTPIdleTimeout, err = durationEnv("SHIP_SIM_HTTP_IDLE_TIMEOUT", cfg.HTTPIdleTimeout); err != nil {
+		parseErrs = append(parseErrs, err.Error())
+	}
+	if cfg.ShutdownTimeout, err = durationEnv("SHIP_SIM_SHUTDOWN_TIMEOUT", cfg.ShutdownTimeout); err != nil {
+		parseErrs = append(parseErrs, err.Error())
+	}
 	if len(parseErrs) > 0 {
 		return cfg, errors.New(strings.Join(parseErrs, "; "))
 	}
@@ -85,6 +111,21 @@ func (c Config) Validate() error {
 	}
 	if c.MaxTrackPointsPerRun > 0 && c.MaxTrackPointsPerRun < 1000 {
 		details = append(details, "SHIP_SIM_MAX_TRACK_POINTS_PER_RUN must be zero or at least 1000")
+	}
+	if c.HTTPReadTimeout <= 0 {
+		details = append(details, "SHIP_SIM_HTTP_READ_TIMEOUT must be greater than zero")
+	}
+	if c.HTTPReadHeaderTimeout <= 0 {
+		details = append(details, "SHIP_SIM_HTTP_READ_HEADER_TIMEOUT must be greater than zero")
+	}
+	if c.HTTPWriteTimeout <= 0 {
+		details = append(details, "SHIP_SIM_HTTP_WRITE_TIMEOUT must be greater than zero")
+	}
+	if c.HTTPIdleTimeout <= 0 {
+		details = append(details, "SHIP_SIM_HTTP_IDLE_TIMEOUT must be greater than zero")
+	}
+	if c.ShutdownTimeout <= 0 {
+		details = append(details, "SHIP_SIM_SHUTDOWN_TIMEOUT must be greater than zero")
 	}
 	switch c.AuthMode {
 	case AuthOff:
@@ -172,4 +213,16 @@ func int64Env(key string, fallback int64) (int64, error) {
 func intEnv(key string, fallback int) (int, error) {
 	value, err := int64Env(key, int64(fallback))
 	return int(value), err
+}
+
+func durationEnv(key string, fallback time.Duration) (time.Duration, error) {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback, nil
+	}
+	value, err := time.ParseDuration(raw)
+	if err != nil {
+		return fallback, errors.New(key + " must be a duration such as 5s, 1m, or 500ms")
+	}
+	return value, nil
 }

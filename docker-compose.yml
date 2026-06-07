@@ -5,18 +5,23 @@ services:
       db:
         condition: service_healthy
     environment:
-      SHIP_SIM_ENV: ${SHIP_SIM_ENV:-production}
+      SHIP_SIM_ENV: ${SHIP_SIM_ENV:-development}
       SHIP_SIM_ADDR: ${SHIP_SIM_ADDR:-:8080}
-      SHIP_SIM_DATABASE_URL: ${SHIP_SIM_DATABASE_URL:-postgres://shipsim:shipsim@db:5432/shipsim?sslmode=disable}
+      SHIP_SIM_DATABASE_URL: ${SHIP_SIM_DATABASE_URL:-postgres://${POSTGRES_USER:-shipsim}:${POSTGRES_PASSWORD:-shipsim-local-dev-only}@db:5432/${POSTGRES_DB:-shipsim}?sslmode=disable}
       SHIP_SIM_ALLOWED_ORIGINS: ${SHIP_SIM_ALLOWED_ORIGINS:-http://localhost:8080}
-      SHIP_SIM_AUTH_MODE: ${SHIP_SIM_AUTH_MODE:-token}
-      SHIP_SIM_AUTH_TOKEN: ${SHIP_SIM_AUTH_TOKEN:-change-this-before-deploying}
+      SHIP_SIM_AUTH_MODE: ${SHIP_SIM_AUTH_MODE:-off}
+      SHIP_SIM_AUTH_TOKEN: ${SHIP_SIM_AUTH_TOKEN:-}
       SHIP_SIM_AUTH_USER_HEADER: ${SHIP_SIM_AUTH_USER_HEADER:-X-Forwarded-User}
       SHIP_SIM_STATIC_DIR: ${SHIP_SIM_STATIC_DIR:-/app/web}
       SHIP_SIM_SCENARIO_DIR: ${SHIP_SIM_SCENARIO_DIR:-/app/scenarios}
       SHIP_SIM_REQUEST_BODY_LIMIT: ${SHIP_SIM_REQUEST_BODY_LIMIT:-1048576}
-      SHIP_SIM_RETENTION_DAYS: ${SHIP_SIM_RETENTION_DAYS:-30}
-      SHIP_SIM_MAX_TRACK_POINTS_PER_RUN: ${SHIP_SIM_MAX_TRACK_POINTS_PER_RUN:-250000}
+      SHIP_SIM_RETENTION_DAYS: ${SHIP_SIM_RETENTION_DAYS:-0}
+      SHIP_SIM_MAX_TRACK_POINTS_PER_RUN: ${SHIP_SIM_MAX_TRACK_POINTS_PER_RUN:-0}
+      SHIP_SIM_HTTP_READ_TIMEOUT: ${SHIP_SIM_HTTP_READ_TIMEOUT:-10s}
+      SHIP_SIM_HTTP_READ_HEADER_TIMEOUT: ${SHIP_SIM_HTTP_READ_HEADER_TIMEOUT:-5s}
+      SHIP_SIM_HTTP_WRITE_TIMEOUT: ${SHIP_SIM_HTTP_WRITE_TIMEOUT:-30s}
+      SHIP_SIM_HTTP_IDLE_TIMEOUT: ${SHIP_SIM_HTTP_IDLE_TIMEOUT:-60s}
+      SHIP_SIM_SHUTDOWN_TIMEOUT: ${SHIP_SIM_SHUTDOWN_TIMEOUT:-15s}
     ports:
       - "8080:8080"
     restart: unless-stopped
@@ -26,7 +31,7 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-shipsim}
       POSTGRES_USER: ${POSTGRES_USER:-shipsim}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-shipsim}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-shipsim-local-dev-only}
     volumes:
       - ship-sim-db:/var/lib/postgresql/data
       - ./migrations:/docker-entrypoint-initdb.d:ro

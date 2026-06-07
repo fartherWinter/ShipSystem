@@ -230,6 +230,29 @@ func (m *Manager) Stop(ctx context.Context, id string) (model.Run, error) {
 	return run, m.store.SaveRun(ctx, run)
 }
 
+func (m *Manager) Shutdown(ctx context.Context) error {
+	engines := m.engineSnapshot()
+	var errs []error
+	for _, engine := range engines {
+		run := engine.Run()
+		if run.Status != model.RunRunning {
+			continue
+		}
+		stopped := engine.Stop()
+		if m.logger != nil {
+			m.logger.Info("run stopped during shutdown", "run_id", stopped.ID, "status", stopped.Status)
+		}
+		if err := m.store.SaveRun(ctx, stopped); err != nil {
+			errs = append(errs, fmt.Errorf("save shutdown run %s: %w", stopped.ID, err))
+			continue
+		}
+		if err := m.saveSnapshot(ctx, engine.Snapshot()); err != nil {
+			errs = append(errs, fmt.Errorf("save shutdown snapshot %s: %w", stopped.ID, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
 func (m *Manager) SubmitAction(ctx context.Context, id string, action model.Action) (model.SimEvent, error) {
 	engine, err := m.requireEngine(ctx, id)
 	if err != nil {
@@ -311,6 +334,16 @@ func (m *Manager) engine(id string) *Engine {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.engines[id]
+}
+
+func (m *Manager) engineSnapshot() []*Engine {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	engines := make([]*Engine, 0, len(m.engines))
+	for _, engine := range m.engines {
+		engines = append(engines, engine)
+	}
+	return engines
 }
 
 func (m *Manager) requireEngine(ctx context.Context, id string) (*Engine, error) {

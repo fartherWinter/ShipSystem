@@ -84,15 +84,22 @@ The HTTP server sets baseline security headers on all responses:
 
 ## Cloud Demo Deployment
 
-Copy `.env.example` to `.env`, change `SHIP_SIM_AUTH_TOKEN`,
-`SHIP_SIM_ALLOWED_ORIGINS`, and the PostgreSQL password, then start:
+For a local Compose demo, copy `.env.local.example` to `.env` and start:
 
 ```powershell
+Copy-Item .env.local.example .env
 docker compose up --build
 ```
 
-The Compose file runs the app and PostGIS. The migration is mounted into
-`/docker-entrypoint-initdb.d` and is applied when the database volume is first
+The Compose defaults are development-oriented and use authentication off plus a
+local-only database password. Production deployments must use
+`.env.production.example` as a template, replace all placeholders with secret
+manager values, set a narrow `SHIP_SIM_ALLOWED_ORIGINS`, and choose token or
+proxy authentication explicitly. See `docs/deployment.md` for secret management,
+HTTP timeout, graceful shutdown, and Compose validation guidance.
+
+The Compose file runs the app and PostGIS. The migrations are mounted into
+`/docker-entrypoint-initdb.d` and are applied when the database volume is first
 created. For an existing database, apply `migrations/001_init.sql` and then
 `migrations/002_snapshot_frames.sql` manually.
 
