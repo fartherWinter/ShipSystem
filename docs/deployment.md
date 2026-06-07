@@ -115,3 +115,9 @@ docker compose up --build
 ```
 
 For production, create an untracked environment file from `.env.production.example`, replace placeholders with real secret-backed values, and verify authentication and allowed origins before exposing the service.
+
+## CI/CD and Release Artifacts
+
+Use `.github/workflows/ci.yml` as the default release gate. It runs backend tests, frontend tests/build, generated type checks, govulncheck, npm audit, Docker build, SBOM generation, and Trivy image scanning.
+
+Use traceable image tags such as `shipsim:vX.Y.Z`, `shipsim:git-<short-sha>`, or `shipsim:ci-<short-sha>`, and record the immutable image digest in release notes. Keep the generated SBOM with the release artifacts. See `docs/release.md` for the release checklist and exception policy.

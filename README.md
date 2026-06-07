@@ -134,6 +134,9 @@ Run the optional Postgres integration test against an isolated test database:
 See `docs/database.md` for database migration, backup/preview, and snapshot
 write reliability guidance.
 
+CI/CD, release tagging, SBOM, and image scanning guidance is in
+`docs/release.md`.
+
 ## API Quick Start
 
 ```powershell

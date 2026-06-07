@@ -4,6 +4,8 @@ WORKDIR /src/web
 COPY web/package*.json ./
 RUN npm ci
 COPY web/ ./
+COPY docs/openapi.json /src/docs/openapi.json
+COPY scripts/generate-openapi-types.mjs /src/scripts/generate-openapi-types.mjs
 ARG FRONTEND_API_BASE=http://localhost:8080
 ARG FRONTEND_MODE=off
 ARG FRONTEND_MAP_TILE_URL=https://tile.openstreetmap.org/{z}/{x}/{y}.png
@@ -13,6 +15,7 @@ RUN VITE_API_BASE="$FRONTEND_API_BASE" VITE_AUTH_MODE="$FRONTEND_MODE" VITE_MAP_
 FROM golang:1.23-alpine AS backend-build
 
 WORKDIR /src
+ENV GOTOOLCHAIN=go1.26.4+auto
 COPY go.mod go.sum ./
 RUN go mod download
 COPY cmd/ ./cmd/

@@ -4,8 +4,8 @@ ShipSystem is a training, demonstration, replay, and audit simulator. Keep it in
 
 ## Prerequisites
 
-- Go 1.23 or newer.
-- Node.js 20 or newer with npm.
+- Go 1.26.4 security toolchain or newer. The module keeps `go 1.23` language compatibility but uses `toolchain go1.26.4` for vulnerability-fixed builds.
+- Node.js 20 or newer with npm. The current Vite 6 build works on Node 20.16 and newer; CI uses Node 20.
 - Docker and Docker Compose for container and PostgreSQL/PostGIS workflows.
 - Optional: `make` for the root workflow shortcuts.
 
@@ -123,6 +123,7 @@ make lint
 make docker-build
 make postgres-test
 make api-types
+make security-audit
 ```
 
 The targets expand to the same underlying commands:
@@ -133,6 +134,7 @@ The targets expand to the same underlying commands:
 - `docker-build`: local Docker image build, default tag `shipsim:local`.
 - `postgres-test`: isolated PostGIS store contract test using `docker-compose.test.yml`.
 - `api-types`: generate frontend TypeScript API types from `docs/openapi.json`.
+- `security-audit`: run `govulncheck` and `npm audit` against a registry that supports the npm security endpoint.
 - `dev`: backend and Vite frontend development servers.
 
 On systems without `make`, run the underlying Go, npm, and Docker commands directly.

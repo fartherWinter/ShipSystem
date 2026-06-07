@@ -6,7 +6,7 @@ IMAGE ?= shipsim:local
 POSTGRES_TEST_PROJECT ?= shipsim-test
 POSTGRES_TEST_DSN ?= postgres://shipsim_test:shipsim-test-only@127.0.0.1:15432/shipsim_test?sslmode=disable
 
-.PHONY: dev test build lint docker-build postgres-test api-types backend-dev frontend-dev frontend-install
+.PHONY: dev test build lint docker-build postgres-test api-types security-audit backend-dev frontend-dev frontend-install
 
 dev:
 	@echo "Starting backend on $${SHIP_SIM_ADDR:-:8080} and frontend on http://127.0.0.1:5173"
@@ -29,6 +29,10 @@ api-types:
 
 docker-build:
 	docker build -t $(IMAGE) .
+
+security-audit:
+	go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+	cd $(WEB_DIR) && npm audit --audit-level=high --registry=https://registry.npmjs.org
 
 postgres-test:
 	@trap 'docker compose -p $(POSTGRES_TEST_PROJECT) -f docker-compose.test.yml --profile test down -v' EXIT; \
