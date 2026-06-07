@@ -193,7 +193,30 @@ func TestTokenAuthProtectsAPIAndWebSocket(t *testing.T) {
 		t.Fatalf("expected unauthenticated 401, got %d", res.StatusCode)
 	}
 
+	res, err = http.Get(ts.URL + "/api/runs?access_token=secret")
+	if err != nil {
+		t.Fatalf("query token runs request: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected query token 401, got %d", res.StatusCode)
+	}
+
 	req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/runs", nil)
+	if err != nil {
+		t.Fatalf("new wrong-token request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer wrong")
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("wrong-token runs request: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected wrong token 401, got %d", res.StatusCode)
+	}
+
+	req, err = http.NewRequest(http.MethodGet, ts.URL+"/api/runs", nil)
 	if err != nil {
 		t.Fatalf("new request: %v", err)
 	}
@@ -205,6 +228,30 @@ func TestTokenAuthProtectsAPIAndWebSocket(t *testing.T) {
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("expected authenticated 200, got %d", res.StatusCode)
+	}
+}
+
+func TestSecurityHeaders(t *testing.T) {
+	server := NewServer(sim.NewManager(store.NewMemory(), slog.Default()), slog.Default())
+	ts := httptest.NewServer(server.Routes())
+	defer ts.Close()
+
+	res, err := http.Get(ts.URL + "/healthz")
+	if err != nil {
+		t.Fatalf("health request: %v", err)
+	}
+	defer res.Body.Close()
+	if res.Header.Get("Content-Security-Policy") == "" {
+		t.Fatal("expected Content-Security-Policy")
+	}
+	if got := res.Header.Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Fatalf("expected nosniff, got %q", got)
+	}
+	if got := res.Header.Get("Referrer-Policy"); got != "no-referrer" {
+		t.Fatalf("expected no-referrer, got %q", got)
+	}
+	if got := res.Header.Get("X-Frame-Options"); got != "DENY" {
+		t.Fatalf("expected DENY, got %q", got)
 	}
 }
 
@@ -531,6 +578,42 @@ func TestAuthOwnerIsolation(t *testing.T) {
 		t.Fatalf("expected token-user owner, got %q", ownedRun.OwnerID)
 	}
 
+	res, err = http.Get(ts.URL + "/api/runs/" + ownedRun.ID + "/report?format=csv")
+	if err != nil {
+		t.Fatalf("unauthenticated report export: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected unauthenticated report 401, got %d", res.StatusCode)
+	}
+
+	req, err = http.NewRequest(http.MethodGet, ts.URL+"/api/runs/"+ownedRun.ID+"/report?format=csv", nil)
+	if err != nil {
+		t.Fatalf("new wrong-token report request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer wrong")
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("wrong-token report export: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected wrong-token report 401, got %d", res.StatusCode)
+	}
+
+	req = authenticatedRequest(t, http.MethodGet, ts.URL+"/api/runs/"+ownedRun.ID+"/report?format=csv", nil)
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("authenticated report export: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("expected authenticated report 200, got %d", res.StatusCode)
+	}
+	if contentType := res.Header.Get("Content-Type"); !strings.HasPrefix(contentType, "text/csv") {
+		t.Fatalf("expected csv report, got %q", contentType)
+	}
+
 	otherRun, err := manager.CreateRunForOwner(context.Background(), "other-user", "other", sim.DefaultScenario())
 	if err != nil {
 		t.Fatalf("create other run: %v", err)
@@ -646,6 +729,76 @@ func TestProxyUserOwnerIsolation(t *testing.T) {
 	}
 }
 
+func TestAuthenticatedWebSocketUsesOneTimeTicket(t *testing.T) {
+	cfg := config.Default()
+	cfg.AuthMode = config.AuthToken
+	cfg.AuthToken = "secret"
+	server := NewServerWithConfig(sim.NewManager(store.NewMemory(), slog.Default()), slog.Default(), cfg)
+	ts := httptest.NewServer(server.Routes())
+	defer ts.Close()
+
+	req := authenticatedRequest(t, http.MethodPost, ts.URL+"/api/runs", bytes.NewBufferString(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("create authenticated run: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("expected authenticated create 201, got %d", res.StatusCode)
+	}
+	var run model.Run
+	if err := json.NewDecoder(res.Body).Decode(&run); err != nil {
+		t.Fatalf("decode run: %v", err)
+	}
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/runs/" + run.ID
+	conn, wsRes, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if conn != nil {
+		_ = conn.Close()
+	}
+	if err == nil {
+		t.Fatal("expected websocket without ticket to fail")
+	}
+	if responseStatus(wsRes) != http.StatusUnauthorized {
+		t.Fatalf("expected websocket without ticket 401, got %v", responseStatus(wsRes))
+	}
+
+	conn, wsRes, err = websocket.DefaultDialer.Dial(wsURL+"?access_token=secret", nil)
+	if conn != nil {
+		_ = conn.Close()
+	}
+	if err == nil {
+		t.Fatal("expected websocket with long-lived query token to fail")
+	}
+	if responseStatus(wsRes) != http.StatusUnauthorized {
+		t.Fatalf("expected websocket query token 401, got %v", responseStatus(wsRes))
+	}
+
+	ticket := requestWSTicket(t, ts.URL, run.ID)
+	conn, wsRes, err = websocket.DefaultDialer.Dial(wsURL+"?ticket="+ticket, nil)
+	if conn != nil {
+		_ = conn.Close()
+	}
+	if err != nil {
+		t.Fatalf("expected websocket ticket dial to succeed, status=%v err=%v", responseStatus(wsRes), err)
+	}
+	if responseStatus(wsRes) != http.StatusSwitchingProtocols {
+		t.Fatalf("expected websocket 101, got %v", responseStatus(wsRes))
+	}
+
+	conn, wsRes, err = websocket.DefaultDialer.Dial(wsURL+"?ticket="+ticket, nil)
+	if conn != nil {
+		_ = conn.Close()
+	}
+	if err == nil {
+		t.Fatal("expected reused websocket ticket to fail")
+	}
+	if responseStatus(wsRes) != http.StatusUnauthorized {
+		t.Fatalf("expected reused ticket 401, got %v", responseStatus(wsRes))
+	}
+}
+
 func TestWebSocketConnectsThroughMiddleware(t *testing.T) {
 	server := NewServer(sim.NewManager(store.NewMemory(), slog.Default()), slog.Default())
 	ts := httptest.NewServer(server.Routes())
@@ -715,6 +868,29 @@ func authenticatedRequest(t *testing.T, method, url string, body io.Reader) *htt
 	}
 	req.Header.Set("Authorization", "Bearer secret")
 	return req
+}
+
+func requestWSTicket(t *testing.T, baseURL, runID string) string {
+	t.Helper()
+	req := authenticatedRequest(t, http.MethodPost, baseURL+"/api/runs/"+runID+"/ws-ticket", nil)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request websocket ticket: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("expected websocket ticket 201, got %d", res.StatusCode)
+	}
+	var payload struct {
+		Ticket string `json:"ticket"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode websocket ticket: %v", err)
+	}
+	if payload.Ticket == "" {
+		t.Fatal("expected websocket ticket")
+	}
+	return payload.Ticket
 }
 
 func responseStatus(res *http.Response) int {

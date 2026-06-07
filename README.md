@@ -62,10 +62,25 @@ $env:SHIP_SIM_AUTH_MODE="token"
 $env:SHIP_SIM_AUTH_TOKEN="replace-with-a-secret"
 ```
 
-`SHIP_SIM_AUTH_MODE=proxy` is also supported for OIDC/auth-proxy deployments; set
-`SHIP_SIM_AUTH_USER_HEADER` to the trusted user header from the proxy.
-When authentication is enabled, run listing and run-scoped APIs are limited to
-the authenticated token user or proxy user.
+Token auth is intended for demo or simple single-user deployments. It is not a
+multi-user production identity system. `SHIP_SIM_AUTH_MODE=proxy` is supported
+for OIDC/auth-proxy deployments; set `SHIP_SIM_AUTH_USER_HEADER` to the trusted
+user header from the proxy. The reverse proxy must remove any incoming copy of
+that header before setting it, and the application must not be exposed directly
+to the public internet in proxy-auth mode. When authentication is enabled, run
+listing and run-scoped APIs are limited to the authenticated token user or proxy
+user.
+
+Long-lived credentials are not accepted through the `access_token` query
+parameter. Browser report export uses authenticated `fetch` requests and Blob
+downloads so credentials stay in headers. WebSocket clients first request a
+short-lived one-time ticket from `POST /api/runs/{run_id}/ws-ticket`, then
+connect to `/ws/runs/{run_id}?ticket=...`; the ticket is bound to that run and
+is consumed on use.
+
+The HTTP server sets baseline security headers on all responses:
+`Content-Security-Policy`, `X-Content-Type-Options: nosniff`,
+`Referrer-Policy: no-referrer`, and `X-Frame-Options: DENY`.
 
 ## Cloud Demo Deployment
 
@@ -178,6 +193,18 @@ Manual retention also accepts `cutoff`, `ended_before`, and
 `max_track_points_per_run`. In token or proxy authentication mode, retention,
 run listing, run-scoped replay, report, event, track, and snapshot APIs are
 limited to the authenticated owner.
+
+Security notes:
+
+- Do not put long-lived API tokens in URLs. Use `Authorization: Bearer ...` or
+  `X-Ship-Sim-Token` for simple token deployments.
+- WebSocket access in authenticated deployments requires a one-time ticket from
+  the authenticated API.
+- Proxy-auth deployments require a trusted reverse proxy that overwrites and
+  sanitizes `SHIP_SIM_AUTH_USER_HEADER`; direct public exposure can let clients
+  spoof identity headers.
+- The system remains training-only. Do not add real weapon-control,
+  fire-control, electronic-warfare, or radar control integrations.
 
 API errors use a stable shape:
 

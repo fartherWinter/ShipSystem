@@ -167,29 +167,52 @@ export function getRunReport(runID: string): Promise<RunReport> {
   return apiFetch<RunReport>(`/api/runs/${runID}/report`);
 }
 
-export function reportCsvUrl(base: string, runID: string): string {
-  return reportUrl(base, runID, "csv");
+export type WebSocketTicket = {
+  ticket: string;
+  expires_at: string;
+};
+
+export function createWebSocketTicket(runID: string): Promise<WebSocketTicket> {
+  return apiFetch<WebSocketTicket>(`/api/runs/${runID}/ws-ticket`, { method: "POST" });
 }
 
-export function reportJsonUrl(base: string, runID: string): string {
-  return reportUrl(base, runID, "json");
-}
-
-function reportUrl(base: string, runID: string, format: "csv" | "json"): string {
-  const url = new URL(`${base}/api/runs/${runID}/report`);
+export function reportDownloadPath(runID: string, format: "csv" | "json"): string {
+  const query = new URLSearchParams();
   if (format === "csv") {
-    url.searchParams.set("format", "csv");
+    query.set("format", "csv");
   }
-  if (apiToken) {
-    url.searchParams.set("access_token", apiToken);
-  }
-  return url.toString();
+  const suffix = query.toString();
+  return `/api/runs/${runID}/report${suffix ? `?${suffix}` : ""}`;
 }
 
-export function toWsUrl(base: string, runID: string): string {
-  const url = new URL(`${base.replace(/^http/, "ws")}/ws/runs/${runID}`);
+export async function downloadRunReport(runID: string, format: "csv" | "json"): Promise<Blob> {
+  const headers = new Headers();
   if (apiToken) {
-    url.searchParams.set("access_token", apiToken);
+    headers.set("Authorization", `Bearer ${apiToken}`);
+  }
+  const res = await fetch(`${apiBase}${reportDownloadPath(runID, format)}`, { headers });
+  if (!res.ok) {
+    const text = await res.text();
+    const body = text ? JSON.parse(text) : null;
+    const error = body?.error;
+    throw new ApiRequestError(
+      res.status,
+      error?.code ?? "request_failed",
+      error?.message ?? res.statusText,
+      error?.details ?? []
+    );
+  }
+  return res.blob();
+}
+
+export function reportFilename(runID: string, format: "csv" | "json"): string {
+  return `run-${runID}-report.${format}`;
+}
+
+export function toWsUrl(base: string, runID: string, ticket?: string): string {
+  const url = new URL(`${base.replace(/^http/, "ws")}/ws/runs/${runID}`);
+  if (ticket) {
+    url.searchParams.set("ticket", ticket);
   }
   return url.toString();
 }

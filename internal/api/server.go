@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/csv"
 	"encoding/json"
 	"errors"
@@ -16,6 +18,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -34,8 +37,23 @@ type Server struct {
 	allowedOrigins map[string]struct{}
 	staticHandler  http.Handler
 	staticDir      string
+	wsTickets      map[string]wsTicket
+	wsTicketsMu    sync.Mutex
 	wsConnections  atomic.Int64
 }
+
+type wsTicket struct {
+	RunID     string
+	UserID    string
+	ExpiresAt time.Time
+}
+
+type wsTicketResponse struct {
+	Ticket    string    `json:"ticket"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+const wsTicketTTL = 30 * time.Second
 
 func NewServer(manager *sim.Manager, logger *slog.Logger) *Server {
 	return NewServerWithConfig(manager, logger, config.Default())
@@ -50,6 +68,7 @@ func NewServerWithConfig(manager *sim.Manager, logger *slog.Logger, cfg config.C
 		logger:         logger,
 		cfg:            cfg,
 		allowedOrigins: parseAllowedOrigins(cfg.AllowedOrigins),
+		wsTickets:      map[string]wsTicket{},
 	}
 	if cfg.StaticDir != "" {
 		server.staticDir = cfg.StaticDir
@@ -76,7 +95,7 @@ func (s *Server) Routes() http.Handler {
 	if s.staticHandler != nil {
 		mux.HandleFunc("/", s.static)
 	}
-	return s.requestID(s.cors(s.auth(mux)))
+	return s.requestID(s.securityHeaders(s.cors(s.auth(mux))))
 }
 
 func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
@@ -382,6 +401,8 @@ func (s *Server) run(w http.ResponseWriter, r *http.Request) {
 		s.replay(w, r, runID)
 	case "report":
 		s.report(w, r, runID)
+	case "ws-ticket":
+		s.wsTicket(w, r, runID)
 	case "zones":
 		s.zones(w, r, runID)
 	default:
@@ -560,6 +581,25 @@ func (s *Server) report(w http.ResponseWriter, r *http.Request, runID string) {
 	writeJSON(w, http.StatusOK, report)
 }
 
+func (s *Server) wsTicket(w http.ResponseWriter, r *http.Request, runID string) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	if !s.cfg.AuthEnabled() {
+		if _, err := s.manager.GetRun(r.Context(), runID); err != nil {
+			writeError(w, http.StatusNotFound, "run_not_found", err)
+			return
+		}
+	}
+	ticket, expiresAt, err := s.issueWSTicket(runID, userFromContext(r.Context()))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "ws_ticket_failed", err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, wsTicketResponse{Ticket: ticket, ExpiresAt: expiresAt})
+}
+
 func (s *Server) zones(w http.ResponseWriter, r *http.Request, runID string) {
 	if r.Method != http.MethodGet {
 		methodNotAllowed(w)
@@ -579,14 +619,18 @@ func (s *Server) wsRun(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	if s.cfg.AuthEnabled() {
-		if _, ok := s.authorizeRun(w, r, runID); !ok {
-			return
-		}
-	}
 	if !s.checkOrigin(r) {
 		writeError(w, http.StatusForbidden, "origin_not_allowed", errors.New("websocket origin is not allowed"))
 		return
+	}
+	if s.cfg.AuthEnabled() {
+		userID, ok := s.consumeWSTicket(r.URL.Query().Get("ticket"), runID)
+		if !ok {
+			writeError(w, http.StatusUnauthorized, "unauthorized", errors.New("websocket ticket is required"))
+			return
+		}
+		ctx := context.WithValue(r.Context(), userIDKey, userID)
+		r = r.WithContext(ctx)
 	}
 	ch, cancel, err := s.manager.Subscribe(runID)
 	if err != nil {
@@ -635,6 +679,48 @@ func (s *Server) wsRun(w http.ResponseWriter, r *http.Request) {
 			}
 		case <-r.Context().Done():
 			return
+		}
+	}
+}
+
+func (s *Server) issueWSTicket(runID, userID string) (string, time.Time, error) {
+	tokenBytes := make([]byte, 32)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		return "", time.Time{}, err
+	}
+	ticketValue := base64.RawURLEncoding.EncodeToString(tokenBytes)
+	expiresAt := time.Now().UTC().Add(wsTicketTTL)
+	s.wsTicketsMu.Lock()
+	defer s.wsTicketsMu.Unlock()
+	s.pruneExpiredWSTicketsLocked(time.Now().UTC())
+	s.wsTickets[ticketValue] = wsTicket{
+		RunID:     runID,
+		UserID:    userID,
+		ExpiresAt: expiresAt,
+	}
+	return ticketValue, expiresAt, nil
+}
+
+func (s *Server) consumeWSTicket(ticketValue, runID string) (string, bool) {
+	if strings.TrimSpace(ticketValue) == "" {
+		return "", false
+	}
+	now := time.Now().UTC()
+	s.wsTicketsMu.Lock()
+	defer s.wsTicketsMu.Unlock()
+	s.pruneExpiredWSTicketsLocked(now)
+	ticket, ok := s.wsTickets[ticketValue]
+	if !ok || ticket.RunID != runID || ticket.ExpiresAt.Before(now) {
+		return "", false
+	}
+	delete(s.wsTickets, ticketValue)
+	return ticket.UserID, true
+}
+
+func (s *Server) pruneExpiredWSTicketsLocked(now time.Time) {
+	for ticketValue, ticket := range s.wsTickets {
+		if !ticket.ExpiresAt.After(now) {
+			delete(s.wsTickets, ticketValue)
 		}
 	}
 }
@@ -829,8 +915,7 @@ func (s *Server) requiresAuth(r *http.Request) bool {
 	path := r.URL.Path
 	return path == "/readyz" || path == "/metrics" || path == "/api/runs" || path == "/api/scenarios" ||
 		strings.HasPrefix(path, "/api/retention/") ||
-		strings.HasPrefix(path, "/api/runs/") || strings.HasPrefix(path, "/api/scenarios/") ||
-		strings.HasPrefix(path, "/ws/")
+		strings.HasPrefix(path, "/api/runs/") || strings.HasPrefix(path, "/api/scenarios/")
 }
 
 func (s *Server) authenticate(r *http.Request) (string, bool) {
@@ -839,9 +924,6 @@ func (s *Server) authenticate(r *http.Request) (string, bool) {
 		token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 		if token == "" {
 			token = r.Header.Get("X-Ship-Sim-Token")
-		}
-		if token == "" {
-			token = r.URL.Query().Get("access_token")
 		}
 		if token != "" && token == s.cfg.AuthToken {
 			return "token-user", true
@@ -855,6 +937,16 @@ func (s *Server) authenticate(r *http.Request) (string, bool) {
 		return "", true
 	}
 	return "", false
+}
+
+func (s *Server) securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; connect-src 'self' ws: wss: https:; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src 'self' blob:; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("X-Frame-Options", "DENY")
+		next.ServeHTTP(w, r)
+	})
 }
 
 func userFromContext(ctx context.Context) string {

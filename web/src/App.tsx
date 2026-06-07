@@ -6,8 +6,10 @@ import {
   ApiRequestError,
   apiBase,
   commandRun,
+  createWebSocketTicket,
   createRun,
   clearApiToken,
+  downloadRunReport,
   getNearestSnapshot,
   getRunReport,
   listEvents,
@@ -17,8 +19,7 @@ import {
   listTrackPoints,
   listTracks,
   listZones,
-  reportCsvUrl,
-  reportJsonUrl,
+  reportFilename,
   setApiToken,
   submitTrainingAction,
   toWsUrl
@@ -84,44 +85,63 @@ export function App() {
 
   useEffect(() => {
     if (!run) return;
+    const runID = run.id;
     let closed = false;
     let retryTimer: number | undefined;
+    let socket: WebSocket | undefined;
     setConnectionState("connecting");
-    const socket = new WebSocket(toWsUrl(apiBase, run.id));
 
-    socket.onmessage = (event) => {
-      if (closed) return;
-      const message = JSON.parse(event.data);
-      if (message.type === "snapshot") {
-        const nextSnapshot = message.payload as Snapshot;
-        setSnapshot(nextSnapshot);
-        setTracks(nextSnapshot.tracks);
-        if (nextSnapshot.events.length > 0) {
-          setEvents((items) => mergeEvents(nextSnapshot.events, items));
+    async function connect() {
+      try {
+        const wsTicket = await createWebSocketTicket(runID);
+        if (closed) return;
+        socket = new WebSocket(toWsUrl(apiBase, runID, wsTicket.ticket));
+        socket.onmessage = (event) => {
+          if (closed) return;
+          const message = JSON.parse(event.data);
+          if (message.type === "snapshot") {
+            const nextSnapshot = message.payload as Snapshot;
+            setSnapshot(nextSnapshot);
+            setTracks(nextSnapshot.tracks);
+            if (nextSnapshot.events.length > 0) {
+              setEvents((items) => mergeEvents(nextSnapshot.events, items));
+            }
+            if (!replayActiveRef.current) {
+              setConnectionState("live");
+            }
+            setError("");
+          }
+        };
+        socket.onerror = () => {
+          if (!closed) {
+            setConnectionState("error");
+            setError("Live stream is unavailable; replay data remains available.");
+          }
+        };
+        socket.onclose = () => {
+          if (!closed) {
+            setConnectionState("replay");
+            const delay = Math.min(1000 * 2 ** streamAttempt, 15000);
+            retryTimer = window.setTimeout(() => setStreamAttempt((attempt) => attempt + 1), delay);
+          }
+        };
+      } catch (err) {
+        if (!closed) {
+          setConnectionState("error");
+          handleError(err);
+          if (!(err instanceof ApiRequestError && err.status === 401)) {
+            const delay = Math.min(1000 * 2 ** streamAttempt, 15000);
+            retryTimer = window.setTimeout(() => setStreamAttempt((attempt) => attempt + 1), delay);
+          }
         }
-        if (!replayActiveRef.current) {
-          setConnectionState("live");
-        }
-        setError("");
       }
-    };
-    socket.onerror = () => {
-      if (!closed) {
-        setConnectionState("error");
-        setError("Live stream is unavailable; replay data remains available.");
-      }
-    };
-    socket.onclose = () => {
-      if (!closed) {
-        setConnectionState("replay");
-        const delay = Math.min(1000 * 2 ** streamAttempt, 15000);
-        retryTimer = window.setTimeout(() => setStreamAttempt((attempt) => attempt + 1), delay);
-      }
-    };
+    }
+
+    void connect();
     return () => {
       closed = true;
       if (retryTimer) window.clearTimeout(retryTimer);
-      socket.close();
+      socket?.close();
     };
   }, [run?.id, streamAttempt]);
 
@@ -324,9 +344,12 @@ export function App() {
     setConnectionState(snapshot ? "live" : "connecting");
   }
 
-  function handleExportReport(format: ReportExportFormat) {
+  async function handleExportReport(format: ReportExportFormat) {
     if (!run) return;
-    window.location.assign(format === "csv" ? reportCsvUrl(apiBase, run.id) : reportJsonUrl(apiBase, run.id));
+    await withBusy(async () => {
+      const blob = await downloadRunReport(run.id, format);
+      saveBlob(blob, reportFilename(run.id, format));
+    });
   }
 
   async function withBusy(task: () => Promise<void>) {
@@ -580,4 +603,16 @@ function snapshotFromFrame(frame: SnapshotFrame): Snapshot {
 
 function shortID(id: string) {
   return id.slice(0, 8);
+}
+
+function saveBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.rel = "noopener";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }

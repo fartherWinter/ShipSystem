@@ -27,6 +27,12 @@ $env:SHIP_SIM_REQUEST_BODY_LIMIT="1048576"
 
 Production mode must not run without authentication. For a simple demo or single-user deployment, token auth can be enabled with `SHIP_SIM_AUTH_MODE=token` and `SHIP_SIM_AUTH_TOKEN`; this is not a multi-user production authentication design. Proxy auth is intended for deployments where a trusted reverse proxy performs authentication and passes a sanitized user header.
 
+Do not pass long-lived credentials through URLs. The backend rejects `access_token` as a normal authentication path. Browser report export must use `fetch` plus Blob download so `Authorization` stays in headers. Authenticated WebSocket connections must first call `POST /api/runs/{run_id}/ws-ticket` and then connect with the returned short-lived one-time `ticket` query parameter.
+
+For `SHIP_SIM_AUTH_MODE=proxy`, the reverse proxy must remove any client-supplied copy of `SHIP_SIM_AUTH_USER_HEADER` before setting the trusted value. Do not expose the app directly to the public internet in proxy-auth mode, because the app trusts that header after the proxy has authenticated the user.
+
+All HTTP responses should keep the baseline security headers enabled: `Content-Security-Policy`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, and `X-Frame-Options: DENY`.
+
 ## Frontend
 
 Install dependencies and start Vite:
