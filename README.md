@@ -179,12 +179,15 @@ Runtime metrics:
 
 ```powershell
 Invoke-RestMethod -Uri http://localhost:8080/metrics
+Invoke-WebRequest -Uri http://localhost:8080/metrics/prometheus
 ```
 
 The metrics payload includes active/listed run counts, WebSocket connection
 count, total snapshot frame count, `snapshot_frames_by_run`, snapshot write
-count, snapshot write failures, and snapshot write last/average/max duration in
-milliseconds.
+count, snapshot write failures, HTTP request counters/latency, engine counts,
+DB readiness, and snapshot write last/average/max duration in milliseconds.
+Prometheus format is available at `/metrics/prometheus`. See
+`docs/observability.md` for probe authentication and log field guidance.
 
 ## Operations
 

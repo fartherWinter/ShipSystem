@@ -393,6 +393,17 @@ func (m *Manager) RuntimeMetrics() RuntimeMetrics {
 	return m.metrics.snapshot()
 }
 
+func (m *Manager) EngineCounts() (int, int) {
+	engines := m.engineSnapshot()
+	running := 0
+	for _, engine := range engines {
+		if engine.Run().Status == model.RunRunning {
+			running++
+		}
+	}
+	return len(engines), running
+}
+
 func (m *Manager) saveSnapshot(ctx context.Context, snapshot model.Snapshot) error {
 	start := time.Now()
 	snapshotCtx, cancel := snapshotContext(ctx, m.snapshotWriteTimeout)

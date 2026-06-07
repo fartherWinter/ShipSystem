@@ -30,16 +30,20 @@ import (
 )
 
 type Server struct {
-	manager        *sim.Manager
-	logger         *slog.Logger
-	cfg            config.Config
-	upgrader       websocket.Upgrader
-	allowedOrigins map[string]struct{}
-	staticHandler  http.Handler
-	staticDir      string
-	wsTickets      map[string]wsTicket
-	wsTicketsMu    sync.Mutex
-	wsConnections  atomic.Int64
+	manager                *sim.Manager
+	logger                 *slog.Logger
+	cfg                    config.Config
+	upgrader               websocket.Upgrader
+	allowedOrigins         map[string]struct{}
+	staticHandler          http.Handler
+	staticDir              string
+	wsTickets              map[string]wsTicket
+	wsTicketsMu            sync.Mutex
+	wsConnections          atomic.Int64
+	requestCount           atomic.Int64
+	requestErrors          atomic.Int64
+	requestDurationTotalNS atomic.Int64
+	requestDurationMaxNS   atomic.Int64
 }
 
 type wsTicket struct {
@@ -51,6 +55,25 @@ type wsTicket struct {
 type wsTicketResponse struct {
 	Ticket    string    `json:"ticket"`
 	ExpiresAt time.Time `json:"expires_at"`
+}
+
+type metricsSnapshot struct {
+	ActiveRuns           int
+	ListedRuns           int
+	WebSocketConnections int64
+	SnapshotFrames       int
+	SnapshotFramesByRun  map[string]int
+	Runtime              sim.RuntimeMetrics
+	RequestCount         int64
+	RequestErrors        int64
+	RequestDurationAvgMS float64
+	RequestDurationMaxMS float64
+	EngineCount          int
+	RunningEngineCount   int
+	StoreReady           bool
+	StoreStatus          model.StoreStatus
+	StoreError           string
+	SampleLimit          int
 }
 
 const wsTicketTTL = 30 * time.Second
@@ -85,6 +108,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/healthz", s.health)
 	mux.HandleFunc("/readyz", s.ready)
 	mux.HandleFunc("/metrics", s.metrics)
+	mux.HandleFunc("/metrics/prometheus", s.prometheusMetrics)
 	mux.HandleFunc("/api/retention/preview", s.retentionPreview)
 	mux.HandleFunc("/api/retention/prune", s.retentionPrune)
 	mux.HandleFunc("/api/runs", s.runs)
@@ -124,10 +148,54 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	limit := 100
-	runs, err := s.listRuns(r.Context(), limit)
+	snapshot, err := s.collectMetrics(r.Context(), limit)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "metrics_failed", err)
 		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"active_runs":                  snapshot.ActiveRuns,
+		"listed_runs":                  snapshot.ListedRuns,
+		"websocket_connections":        snapshot.WebSocketConnections,
+		"snapshot_frames":              snapshot.SnapshotFrames,
+		"snapshot_frames_by_run":       snapshot.SnapshotFramesByRun,
+		"snapshot_write_count":         snapshot.Runtime.SnapshotWriteCount,
+		"snapshot_write_failures":      snapshot.Runtime.SnapshotWriteFailures,
+		"snapshot_write_last_ms":       snapshot.Runtime.SnapshotWriteLastMS,
+		"snapshot_write_avg_ms":        snapshot.Runtime.SnapshotWriteAvgMS,
+		"snapshot_write_max_ms":        snapshot.Runtime.SnapshotWriteMaxMS,
+		"http_request_count":           snapshot.RequestCount,
+		"http_request_errors":          snapshot.RequestErrors,
+		"http_request_duration_avg_ms": snapshot.RequestDurationAvgMS,
+		"http_request_duration_max_ms": snapshot.RequestDurationMaxMS,
+		"engine_count":                 snapshot.EngineCount,
+		"running_engine_count":         snapshot.RunningEngineCount,
+		"db_ready":                     snapshot.StoreReady,
+		"db_store":                     snapshot.StoreStatus.Store,
+		"db_migration_version":         snapshot.StoreStatus.MigrationVersion,
+		"db_error":                     snapshot.StoreError,
+		"sample_limit":                 snapshot.SampleLimit,
+	})
+}
+
+func (s *Server) prometheusMetrics(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	snapshot, err := s.collectMetrics(r.Context(), 100)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "metrics_failed", err)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	writePrometheusMetrics(w, snapshot)
+}
+
+func (s *Server) collectMetrics(ctx context.Context, limit int) (metricsSnapshot, error) {
+	runs, err := s.listRuns(ctx, limit)
+	if err != nil {
+		return metricsSnapshot{}, err
 	}
 	activeRuns := 0
 	snapshotFrames := 0
@@ -137,24 +205,133 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 		if run.Status == model.RunRunning {
 			activeRuns++
 		}
-		if snapshotRange, ok, err := s.manager.SnapshotRange(r.Context(), run.ID); err == nil && ok {
+		if snapshotRange, ok, err := s.manager.SnapshotRange(ctx, run.ID); err == nil && ok {
 			snapshotFrames += snapshotRange.Count
 			snapshotFramesByRun[run.ID] = snapshotRange.Count
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"active_runs":             activeRuns,
-		"listed_runs":             len(runs),
-		"websocket_connections":   s.wsConnections.Load(),
-		"snapshot_frames":         snapshotFrames,
-		"snapshot_frames_by_run":  snapshotFramesByRun,
-		"snapshot_write_count":    runtimeMetrics.SnapshotWriteCount,
-		"snapshot_write_failures": runtimeMetrics.SnapshotWriteFailures,
-		"snapshot_write_last_ms":  runtimeMetrics.SnapshotWriteLastMS,
-		"snapshot_write_avg_ms":   runtimeMetrics.SnapshotWriteAvgMS,
-		"snapshot_write_max_ms":   runtimeMetrics.SnapshotWriteMaxMS,
-		"sample_limit":            limit,
-	})
+	requestCount := s.requestCount.Load()
+	requestDurationAvgMS := 0.0
+	if requestCount > 0 {
+		requestDurationAvgMS = nsToMS(s.requestDurationTotalNS.Load() / requestCount)
+	}
+	engineCount, runningEngineCount := s.manager.EngineCounts()
+	storeStatus, storeErr := s.manager.StoreStatus(ctx)
+	storeReady := storeErr == nil
+	storeError := ""
+	if storeErr != nil {
+		storeError = storeErr.Error()
+	}
+	return metricsSnapshot{
+		ActiveRuns:           activeRuns,
+		ListedRuns:           len(runs),
+		WebSocketConnections: s.wsConnections.Load(),
+		SnapshotFrames:       snapshotFrames,
+		SnapshotFramesByRun:  snapshotFramesByRun,
+		Runtime:              runtimeMetrics,
+		RequestCount:         requestCount,
+		RequestErrors:        s.requestErrors.Load(),
+		RequestDurationAvgMS: requestDurationAvgMS,
+		RequestDurationMaxMS: nsToMS(s.requestDurationMaxNS.Load()),
+		EngineCount:          engineCount,
+		RunningEngineCount:   runningEngineCount,
+		StoreReady:           storeReady,
+		StoreStatus:          storeStatus,
+		StoreError:           storeError,
+		SampleLimit:          limit,
+	}, nil
+}
+
+func writePrometheusMetrics(w io.Writer, snapshot metricsSnapshot) {
+	store := prometheusLabelValue(snapshot.StoreStatus.Store)
+	fmt.Fprintln(w, "# HELP ship_sim_http_requests_total Total HTTP requests handled by ShipSystem.")
+	fmt.Fprintln(w, "# TYPE ship_sim_http_requests_total counter")
+	fmt.Fprintf(w, "ship_sim_http_requests_total %d\n", snapshot.RequestCount)
+	fmt.Fprintln(w, "# HELP ship_sim_http_request_errors_total HTTP requests completed with status >= 400.")
+	fmt.Fprintln(w, "# TYPE ship_sim_http_request_errors_total counter")
+	fmt.Fprintf(w, "ship_sim_http_request_errors_total %d\n", snapshot.RequestErrors)
+	fmt.Fprintln(w, "# HELP ship_sim_http_request_duration_seconds HTTP request duration summary.")
+	fmt.Fprintln(w, "# TYPE ship_sim_http_request_duration_seconds summary")
+	fmt.Fprintf(w, "ship_sim_http_request_duration_seconds_sum %.6f\n", msToSeconds(snapshot.RequestDurationAvgMS*float64(snapshot.RequestCount)))
+	fmt.Fprintf(w, "ship_sim_http_request_duration_seconds_count %d\n", snapshot.RequestCount)
+	fmt.Fprintln(w, "# HELP ship_sim_http_request_duration_seconds_max Maximum observed HTTP request duration.")
+	fmt.Fprintln(w, "# TYPE ship_sim_http_request_duration_seconds_max gauge")
+	fmt.Fprintf(w, "ship_sim_http_request_duration_seconds_max %.6f\n", msToSeconds(snapshot.RequestDurationMaxMS))
+	fmt.Fprintln(w, "# HELP ship_sim_websocket_connections Active WebSocket connections.")
+	fmt.Fprintln(w, "# TYPE ship_sim_websocket_connections gauge")
+	fmt.Fprintf(w, "ship_sim_websocket_connections %d\n", snapshot.WebSocketConnections)
+	fmt.Fprintln(w, "# HELP ship_sim_runs_active Active running runs in the sampled run list.")
+	fmt.Fprintln(w, "# TYPE ship_sim_runs_active gauge")
+	fmt.Fprintf(w, "ship_sim_runs_active %d\n", snapshot.ActiveRuns)
+	fmt.Fprintln(w, "# HELP ship_sim_runs_listed Runs sampled for metrics.")
+	fmt.Fprintln(w, "# TYPE ship_sim_runs_listed gauge")
+	fmt.Fprintf(w, "ship_sim_runs_listed %d\n", snapshot.ListedRuns)
+	fmt.Fprintln(w, "# HELP ship_sim_engines_total Simulation engines in memory.")
+	fmt.Fprintln(w, "# TYPE ship_sim_engines_total gauge")
+	fmt.Fprintf(w, "ship_sim_engines_total %d\n", snapshot.EngineCount)
+	fmt.Fprintln(w, "# HELP ship_sim_engines_running Running simulation engines in memory.")
+	fmt.Fprintln(w, "# TYPE ship_sim_engines_running gauge")
+	fmt.Fprintf(w, "ship_sim_engines_running %d\n", snapshot.RunningEngineCount)
+	fmt.Fprintln(w, "# HELP ship_sim_snapshot_frames_total Snapshot frames counted in sampled runs.")
+	fmt.Fprintln(w, "# TYPE ship_sim_snapshot_frames_total gauge")
+	fmt.Fprintf(w, "ship_sim_snapshot_frames_total %d\n", snapshot.SnapshotFrames)
+	fmt.Fprintln(w, "# HELP ship_sim_snapshot_writes_total Snapshot write attempts.")
+	fmt.Fprintln(w, "# TYPE ship_sim_snapshot_writes_total counter")
+	fmt.Fprintf(w, "ship_sim_snapshot_writes_total %d\n", snapshot.Runtime.SnapshotWriteCount)
+	fmt.Fprintln(w, "# HELP ship_sim_snapshot_write_failures_total Snapshot write failures.")
+	fmt.Fprintln(w, "# TYPE ship_sim_snapshot_write_failures_total counter")
+	fmt.Fprintf(w, "ship_sim_snapshot_write_failures_total %d\n", snapshot.Runtime.SnapshotWriteFailures)
+	fmt.Fprintln(w, "# HELP ship_sim_snapshot_write_duration_seconds Snapshot write duration gauges.")
+	fmt.Fprintln(w, "# TYPE ship_sim_snapshot_write_duration_seconds gauge")
+	fmt.Fprintf(w, "ship_sim_snapshot_write_duration_seconds{stat=\"last\"} %.6f\n", msToSeconds(snapshot.Runtime.SnapshotWriteLastMS))
+	fmt.Fprintf(w, "ship_sim_snapshot_write_duration_seconds{stat=\"avg\"} %.6f\n", msToSeconds(snapshot.Runtime.SnapshotWriteAvgMS))
+	fmt.Fprintf(w, "ship_sim_snapshot_write_duration_seconds{stat=\"max\"} %.6f\n", msToSeconds(snapshot.Runtime.SnapshotWriteMaxMS))
+	fmt.Fprintln(w, "# HELP ship_sim_db_ready Database/store readiness state.")
+	fmt.Fprintln(w, "# TYPE ship_sim_db_ready gauge")
+	fmt.Fprintf(w, "ship_sim_db_ready{store=\"%s\"} %d\n", store, boolGauge(snapshot.StoreReady))
+	fmt.Fprintln(w, "# HELP ship_sim_db_migration_version Current store migration version.")
+	fmt.Fprintln(w, "# TYPE ship_sim_db_migration_version gauge")
+	fmt.Fprintf(w, "ship_sim_db_migration_version{store=\"%s\"} %d\n", store, snapshot.StoreStatus.MigrationVersion)
+}
+
+func (s *Server) recordRequest(status int, duration time.Duration) {
+	s.requestCount.Add(1)
+	if status >= http.StatusBadRequest {
+		s.requestErrors.Add(1)
+	}
+	ns := duration.Nanoseconds()
+	s.requestDurationTotalNS.Add(ns)
+	for {
+		current := s.requestDurationMaxNS.Load()
+		if ns <= current || s.requestDurationMaxNS.CompareAndSwap(current, ns) {
+			return
+		}
+	}
+}
+
+func nsToMS(ns int64) float64 {
+	return float64(ns) / float64(time.Millisecond)
+}
+
+func msToSeconds(ms float64) float64 {
+	return ms / 1000
+}
+
+func boolGauge(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
+}
+
+func prometheusLabelValue(value string) string {
+	value = strings.ReplaceAll(value, `\`, `\\`)
+	value = strings.ReplaceAll(value, `"`, `\"`)
+	value = strings.ReplaceAll(value, "\n", `\n`)
+	if value == "" {
+		return "unknown"
+	}
+	return value
 }
 
 func (s *Server) static(w http.ResponseWriter, r *http.Request) {
@@ -865,9 +1042,14 @@ func methodNotAllowed(w http.ResponseWriter) {
 type contextKey string
 
 const (
-	requestIDKey contextKey = "request_id"
-	userIDKey    contextKey = "user_id"
+	requestIDKey        contextKey = "request_id"
+	userIDKey           contextKey = "user_id"
+	requestLogFieldsKey contextKey = "request_log_fields"
 )
+
+type requestLogFields struct {
+	UserID string
+}
 
 type statusRecorder struct {
 	http.ResponseWriter
@@ -899,17 +1081,23 @@ func (s *Server) requestID(next http.Handler) http.Handler {
 		if requestID == "" {
 			requestID = fmt.Sprintf("%d", time.Now().UnixNano())
 		}
+		fields := &requestLogFields{}
 		ctx := context.WithValue(r.Context(), requestIDKey, requestID)
+		ctx = context.WithValue(ctx, requestLogFieldsKey, fields)
 		w.Header().Set("X-Request-ID", requestID)
 		recorder := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		start := time.Now()
 		next.ServeHTTP(recorder, r.WithContext(ctx))
+		duration := time.Since(start)
+		s.recordRequest(recorder.status, duration)
 		s.logger.Info("request completed",
 			"request_id", requestID,
+			"user_id", fields.UserID,
+			"run_id", runIDFromPath(r.URL.Path),
 			"method", r.Method,
 			"path", r.URL.Path,
 			"status", recorder.status,
-			"duration_ms", time.Since(start).Milliseconds(),
+			"duration_ms", duration.Milliseconds(),
 		)
 	})
 }
@@ -926,6 +1114,9 @@ func (s *Server) auth(next http.Handler) http.Handler {
 			return
 		}
 		ctx := context.WithValue(r.Context(), userIDKey, userID)
+		if fields, ok := r.Context().Value(requestLogFieldsKey).(*requestLogFields); ok {
+			fields.UserID = userID
+		}
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -935,7 +1126,7 @@ func (s *Server) requiresAuth(r *http.Request) bool {
 		return false
 	}
 	path := r.URL.Path
-	return path == "/readyz" || path == "/metrics" || path == "/api/runs" || path == "/api/scenarios" ||
+	return path == "/readyz" || path == "/metrics" || path == "/metrics/prometheus" || path == "/api/runs" || path == "/api/scenarios" ||
 		strings.HasPrefix(path, "/api/retention/") ||
 		strings.HasPrefix(path, "/api/runs/") || strings.HasPrefix(path, "/api/scenarios/")
 }
@@ -974,6 +1165,22 @@ func (s *Server) securityHeaders(next http.Handler) http.Handler {
 func userFromContext(ctx context.Context) string {
 	if userID, ok := ctx.Value(userIDKey).(string); ok {
 		return userID
+	}
+	return ""
+}
+
+func runIDFromPath(path string) string {
+	for _, prefix := range []string{"/api/runs/", "/ws/runs/"} {
+		if strings.HasPrefix(path, prefix) {
+			rest := strings.TrimPrefix(path, prefix)
+			if rest == "" {
+				return ""
+			}
+			if idx := strings.IndexByte(rest, '/'); idx >= 0 {
+				return rest[:idx]
+			}
+			return rest
+		}
 	}
 	return ""
 }

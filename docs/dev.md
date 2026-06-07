@@ -79,6 +79,16 @@ Retention preview and capacity smoke commands:
 
 See `docs/retention.md` for background retention, destructive-operation preview rules, and sizing estimates.
 
+Observability endpoints:
+
+```powershell
+Invoke-RestMethod -Uri http://localhost:8080/healthz
+Invoke-RestMethod -Uri http://localhost:8080/readyz
+Invoke-WebRequest -Uri http://localhost:8080/metrics/prometheus
+```
+
+See `docs/observability.md` for metrics, probe authentication, and log field guidance.
+
 ## Unified Commands
 
 With `make` available from the repository root:

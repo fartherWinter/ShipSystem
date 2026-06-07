@@ -67,6 +67,12 @@ Do not run destructive database operations against shared or production data wit
 
 See `docs/database.md` for migration gate behavior, test database workflow, and snapshot write reliability notes. See `docs/retention.md` for background retention, preview-first pruning, capacity limits, and sizing estimates.
 
+## Probes and Metrics
+
+Use `/healthz` for liveness and `/readyz` for readiness. `/readyz` checks store readiness and migration status, so it can return `503` while `/healthz` remains live. Metrics are available as JSON at `/metrics` and Prometheus text at `/metrics/prometheus`.
+
+In authenticated deployments, `/readyz`, `/metrics`, and `/metrics/prometheus` require authentication. Route probes and scrapers through the same trusted proxy or provide a secret-backed token for token-mode deployments. See `docs/observability.md`.
+
 ## Compose Checks
 
 Validate the Compose model before deployment:

@@ -462,6 +462,15 @@ func TestSnapshotsAndReportAPI(t *testing.T) {
 		"snapshot_write_last_ms",
 		"snapshot_write_avg_ms",
 		"snapshot_write_max_ms",
+		"http_request_count",
+		"http_request_errors",
+		"http_request_duration_avg_ms",
+		"http_request_duration_max_ms",
+		"engine_count",
+		"running_engine_count",
+		"db_ready",
+		"db_store",
+		"db_migration_version",
 		"sample_limit",
 	} {
 		if _, ok := metrics[key]; !ok {
@@ -473,6 +482,35 @@ func TestSnapshotsAndReportAPI(t *testing.T) {
 	}
 	if framesByRun, ok := metrics["snapshot_frames_by_run"].(map[string]any); !ok || framesByRun[run.ID].(float64) == 0 {
 		t.Fatalf("expected per-run snapshot metrics for %s, got %+v", run.ID, metrics["snapshot_frames_by_run"])
+	}
+
+	res, err = http.Get(ts.URL + "/metrics/prometheus")
+	if err != nil {
+		t.Fatalf("prometheus metrics request: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("expected prometheus metrics 200, got %d", res.StatusCode)
+	}
+	if contentType := res.Header.Get("Content-Type"); !strings.HasPrefix(contentType, "text/plain") {
+		t.Fatalf("expected prometheus text response, got %q", contentType)
+	}
+	prometheusBody, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatalf("read prometheus metrics: %v", err)
+	}
+	for _, metric := range []string{
+		"ship_sim_http_requests_total",
+		"ship_sim_http_request_errors_total",
+		"ship_sim_websocket_connections",
+		"ship_sim_snapshot_writes_total",
+		"ship_sim_snapshot_write_failures_total",
+		"ship_sim_engines_total",
+		"ship_sim_db_ready",
+	} {
+		if !strings.Contains(string(prometheusBody), metric) {
+			t.Fatalf("expected prometheus metric %q in %s", metric, string(prometheusBody))
+		}
 	}
 }
 
@@ -687,6 +725,64 @@ func TestAuthOwnerIsolation(t *testing.T) {
 	}
 	if metrics["listed_runs"].(float64) != 1 {
 		t.Fatalf("expected metrics to list only owned runs, got %+v", metrics)
+	}
+
+	req = authenticatedRequest(t, http.MethodGet, ts.URL+"/metrics/prometheus", nil)
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("authenticated prometheus metrics: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("expected authenticated prometheus metrics 200, got %d", res.StatusCode)
+	}
+}
+
+func TestRequestLogsIncludeAuditFieldsWithoutSensitiveValues(t *testing.T) {
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logs, nil))
+	cfg := config.Default()
+	cfg.AuthMode = config.AuthToken
+	cfg.AuthToken = "secret"
+	server := NewServerWithConfig(sim.NewManager(store.NewMemory(), logger), logger, cfg)
+	ts := httptest.NewServer(server.Routes())
+	defer ts.Close()
+
+	req := authenticatedRequest(t, http.MethodPost, ts.URL+"/api/runs", bytes.NewBufferString(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("create authenticated run: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("expected create 201, got %d", res.StatusCode)
+	}
+	var run model.Run
+	if err := json.NewDecoder(res.Body).Decode(&run); err != nil {
+		t.Fatalf("decode run: %v", err)
+	}
+
+	req = authenticatedRequest(t, http.MethodGet, ts.URL+"/api/runs/"+run.ID+"/report?access_token=secret", nil)
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("report request: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("expected report 200, got %d", res.StatusCode)
+	}
+
+	output := logs.String()
+	for _, want := range []string{"request_id=", "user_id=token-user", "run_id=" + run.ID, "status=200", "duration_ms="} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected log field %q in %s", want, output)
+		}
+	}
+	for _, forbidden := range []string{"Authorization", "Bearer", "access_token", "secret"} {
+		if strings.Contains(output, forbidden) {
+			t.Fatalf("log output contains sensitive value %q: %s", forbidden, output)
+		}
 	}
 }
 
