@@ -515,6 +515,21 @@ func TestRetentionPreviewAndPruneAPI(t *testing.T) {
 	if _, err := http.Post(ts.URL+"/api/runs/"+run.ID+"/stop", "application/json", nil); err != nil {
 		t.Fatalf("stop run request: %v", err)
 	}
+	capacityRes, err := http.Get(ts.URL + "/api/retention/preview?max_track_points_per_run=1&max_events_per_run=1&max_snapshots_per_run=1")
+	if err != nil {
+		t.Fatalf("retention capacity preview request: %v", err)
+	}
+	defer capacityRes.Body.Close()
+	if capacityRes.StatusCode != http.StatusOK {
+		t.Fatalf("expected retention capacity preview 200, got %d", capacityRes.StatusCode)
+	}
+	var capacityPreview model.RetentionPreview
+	if err := json.NewDecoder(capacityRes.Body).Decode(&capacityPreview); err != nil {
+		t.Fatalf("decode retention capacity preview: %v", err)
+	}
+	if capacityPreview.TrackPointsMatched == 0 || capacityPreview.SnapshotsMatched == 0 {
+		t.Fatalf("expected retention capacity preview to match excess history, got %+v", capacityPreview)
+	}
 	endedBefore := time.Now().UTC().Add(time.Second).Format(time.RFC3339)
 
 	res, err := http.Get(ts.URL + "/api/retention/preview?ended_before=" + urlQueryEscape(endedBefore))

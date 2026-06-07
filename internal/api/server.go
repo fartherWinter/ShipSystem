@@ -240,8 +240,8 @@ func (s *Server) retentionPrune(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_retention_policy", err)
 		return
 	}
-	if policy.Cutoff.IsZero() && policy.EndedBefore.IsZero() && policy.MaxTrackPointsPerRun <= 0 {
-		writeError(w, http.StatusBadRequest, "empty_retention_policy", errors.New("retention policy must include days, cutoff, ended_before, or max_track_points_per_run"))
+	if retentionPolicyEmpty(policy) {
+		writeError(w, http.StatusBadRequest, "empty_retention_policy", errors.New("retention policy must include days, cutoff, ended_before, max_track_points_per_run, max_events_per_run, or max_snapshots_per_run"))
 		return
 	}
 	result, err := s.manager.Prune(r.Context(), policy)
@@ -266,6 +266,8 @@ func (s *Server) retentionPolicyFromRequest(r *http.Request) (model.RetentionPol
 		Cutoff               string `json:"cutoff"`
 		EndedBefore          string `json:"ended_before"`
 		MaxTrackPointsPerRun int    `json:"max_track_points_per_run"`
+		MaxEventsPerRun      int    `json:"max_events_per_run"`
+		MaxSnapshotsPerRun   int    `json:"max_snapshots_per_run"`
 	}
 	if r.Method == http.MethodPost {
 		if err := s.decodeJSON(r, &req); err != nil {
@@ -277,6 +279,8 @@ func (s *Server) retentionPolicyFromRequest(r *http.Request) (model.RetentionPol
 		req.Cutoff = query.Get("cutoff")
 		req.EndedBefore = query.Get("ended_before")
 		req.MaxTrackPointsPerRun = intValue(query.Get("max_track_points_per_run"))
+		req.MaxEventsPerRun = intValue(query.Get("max_events_per_run"))
+		req.MaxSnapshotsPerRun = intValue(query.Get("max_snapshots_per_run"))
 	}
 	if req.Days < 0 {
 		return model.RetentionPolicy{}, errors.New("days must be zero or greater")
@@ -284,7 +288,17 @@ func (s *Server) retentionPolicyFromRequest(r *http.Request) (model.RetentionPol
 	if req.MaxTrackPointsPerRun < 0 {
 		return model.RetentionPolicy{}, errors.New("max_track_points_per_run must be zero or greater")
 	}
-	policy := model.RetentionPolicy{MaxTrackPointsPerRun: req.MaxTrackPointsPerRun}
+	if req.MaxEventsPerRun < 0 {
+		return model.RetentionPolicy{}, errors.New("max_events_per_run must be zero or greater")
+	}
+	if req.MaxSnapshotsPerRun < 0 {
+		return model.RetentionPolicy{}, errors.New("max_snapshots_per_run must be zero or greater")
+	}
+	policy := model.RetentionPolicy{
+		MaxTrackPointsPerRun: req.MaxTrackPointsPerRun,
+		MaxEventsPerRun:      req.MaxEventsPerRun,
+		MaxSnapshotsPerRun:   req.MaxSnapshotsPerRun,
+	}
 	if s.cfg.AuthEnabled() {
 		policy.OwnerID = userFromContext(r.Context())
 	}
@@ -306,6 +320,14 @@ func (s *Server) retentionPolicyFromRequest(r *http.Request) (model.RetentionPol
 		policy.EndedBefore = endedBefore
 	}
 	return policy, nil
+}
+
+func retentionPolicyEmpty(policy model.RetentionPolicy) bool {
+	return policy.Cutoff.IsZero() &&
+		policy.EndedBefore.IsZero() &&
+		policy.MaxTrackPointsPerRun <= 0 &&
+		policy.MaxEventsPerRun <= 0 &&
+		policy.MaxSnapshotsPerRun <= 0
 }
 
 func (s *Server) scenarios(w http.ResponseWriter, r *http.Request) {

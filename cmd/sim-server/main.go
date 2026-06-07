@@ -50,6 +50,9 @@ func main() {
 		logger.Warn("DATABASE_URL not set; using memory store for local simulation demo")
 	}
 
+	signalCtx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
+
 	manager := sim.NewManagerWithSnapshotWriteTimeout(st, logger, cfg.SnapshotWriteTimeout)
 	if count, err := manager.LoadScenarioDir(cfg.ScenarioDir); err != nil {
 		logger.Error("load scenarios failed", "dir", cfg.ScenarioDir, "error", err)
@@ -57,22 +60,21 @@ func main() {
 	} else {
 		logger.Info("scenarios loaded", "dir", cfg.ScenarioDir, "count", count)
 	}
-	policy := modelRetentionPolicy(cfg.RetentionDays, cfg.MaxTrackPointsPerRun)
+	policy := modelRetentionPolicy(cfg, time.Now().UTC())
 	if retentionPolicyEmpty(policy) {
 		logger.Info("retention prune skipped; no retention policy configured")
 	} else {
-		pruned, err := manager.Prune(context.Background(), policy)
-		if err != nil {
+		if _, err := runRetentionPrune(context.Background(), manager, logger, policy); err != nil {
 			logger.Error("retention prune failed", "error", err)
 			os.Exit(1)
 		}
-		logger.Info("retention prune completed",
-			"runs_matched", pruned.RunsMatched,
-			"events_deleted", pruned.EventsDeleted,
-			"track_points_deleted", pruned.TrackPointsDeleted,
-			"contacts_deleted", pruned.ContactsDeleted,
-			"snapshots_deleted", pruned.SnapshotsDeleted,
-		)
+	}
+	if cfg.RetentionInterval > 0 && !retentionPolicyEmpty(policy) {
+		startRetentionWorker(signalCtx, manager, logger, cfg)
+	} else if cfg.RetentionInterval > 0 {
+		logger.Info("retention worker skipped; interval configured without retention policy")
+	} else {
+		logger.Info("retention worker disabled", "interval", cfg.RetentionInterval.String())
 	}
 	server := api.NewServerWithConfig(manager, logger, cfg)
 
@@ -90,9 +92,6 @@ func main() {
 		logger.Info("ship simulation server starting", "addr", cfg.Addr, "auth_mode", cfg.AuthMode, "env", cfg.Environment)
 		serverErr <- httpServer.ListenAndServe()
 	}()
-
-	signalCtx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stopSignals()
 
 	shutdownCompleted := false
 	select {
@@ -124,14 +123,60 @@ func main() {
 	}
 }
 
-func modelRetentionPolicy(days, maxTrackPoints int) model.RetentionPolicy {
-	policy := model.RetentionPolicy{MaxTrackPointsPerRun: maxTrackPoints}
-	if days > 0 {
-		policy.Cutoff = time.Now().UTC().Add(-time.Duration(days) * 24 * time.Hour)
+func startRetentionWorker(ctx context.Context, manager *sim.Manager, logger *slog.Logger, cfg config.Config) {
+	go func() {
+		ticker := time.NewTicker(cfg.RetentionInterval)
+		defer ticker.Stop()
+		logger.Info("retention worker started", "interval", cfg.RetentionInterval.String())
+		for {
+			select {
+			case <-ctx.Done():
+				logger.Info("retention worker stopped")
+				return
+			case now := <-ticker.C:
+				policy := modelRetentionPolicy(cfg, now.UTC())
+				if retentionPolicyEmpty(policy) {
+					continue
+				}
+				if _, err := runRetentionPrune(ctx, manager, logger, policy); err != nil {
+					logger.Error("retention worker prune failed", "error", err)
+				}
+			}
+		}
+	}()
+}
+
+func runRetentionPrune(ctx context.Context, manager *sim.Manager, logger *slog.Logger, policy model.RetentionPolicy) (model.RetentionResult, error) {
+	pruned, err := manager.Prune(ctx, policy)
+	if err != nil {
+		return model.RetentionResult{}, err
+	}
+	logger.Info("retention prune completed",
+		"runs_matched", pruned.RunsMatched,
+		"events_deleted", pruned.EventsDeleted,
+		"track_points_deleted", pruned.TrackPointsDeleted,
+		"contacts_deleted", pruned.ContactsDeleted,
+		"snapshots_deleted", pruned.SnapshotsDeleted,
+	)
+	return pruned, nil
+}
+
+func modelRetentionPolicy(cfg config.Config, now time.Time) model.RetentionPolicy {
+	policy := model.RetentionPolicy{
+		MaxTrackPointsPerRun: cfg.MaxTrackPointsPerRun,
+		MaxEventsPerRun:      cfg.MaxEventsPerRun,
+		MaxSnapshotsPerRun:   cfg.MaxSnapshotsPerRun,
+	}
+	if cfg.RetentionDays > 0 {
+		policy.Cutoff = now.Add(-time.Duration(cfg.RetentionDays) * 24 * time.Hour)
 	}
 	return policy
 }
 
 func retentionPolicyEmpty(policy model.RetentionPolicy) bool {
-	return policy.Cutoff.IsZero() && policy.EndedBefore.IsZero() && policy.MaxTrackPointsPerRun <= 0
+	return policy.Cutoff.IsZero() &&
+		policy.EndedBefore.IsZero() &&
+		policy.MaxTrackPointsPerRun <= 0 &&
+		policy.MaxEventsPerRun <= 0 &&
+		policy.MaxSnapshotsPerRun <= 0
 }

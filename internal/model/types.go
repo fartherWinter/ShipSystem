@@ -126,6 +126,8 @@ type RetentionPolicy struct {
 	Cutoff               time.Time
 	EndedBefore          time.Time
 	MaxTrackPointsPerRun int
+	MaxEventsPerRun      int
+	MaxSnapshotsPerRun   int
 	OwnerID              string
 }
 
@@ -285,19 +287,19 @@ type TrackStatusSummary struct {
 }
 
 type RunReport struct {
-	Version         int                  `json:"version"`
-	Run             Run                  `json:"run"`
-	ReplayMode      string               `json:"replay_mode"`
-	DurationSeconds int64                `json:"duration_seconds"`
-	TrackCount      int                  `json:"track_count"`
-	ActionStats     []ActionStat         `json:"action_stats"`
-	EventAudit      EventAuditSummary    `json:"event_audit"`
-	ThreatSummary   ThreatSummary        `json:"threat_summary"`
-	FinalTracks     []TrackStatusSummary `json:"final_tracks"`
-	Events          []SimEvent           `json:"events"`
-	SnapshotRange   *SnapshotRange       `json:"snapshot_range,omitempty"`
+	Version          int                  `json:"version"`
+	Run              Run                  `json:"run"`
+	ReplayMode       string               `json:"replay_mode"`
+	DurationSeconds  int64                `json:"duration_seconds"`
+	TrackCount       int                  `json:"track_count"`
+	ActionStats      []ActionStat         `json:"action_stats"`
+	EventAudit       EventAuditSummary    `json:"event_audit"`
+	ThreatSummary    ThreatSummary        `json:"threat_summary"`
+	FinalTracks      []TrackStatusSummary `json:"final_tracks"`
+	Events           []SimEvent           `json:"events"`
+	SnapshotRange    *SnapshotRange       `json:"snapshot_range,omitempty"`
 	SnapshotCoverage *SnapshotCoverage    `json:"snapshot_coverage,omitempty"`
-	SafetyNotice    string               `json:"safety_notice"`
+	SafetyNotice     string               `json:"safety_notice"`
 }
 
 const SafetyNotice = "Training/simulation only. This system does not provide real fire-control, weapon-control, electronic-warfare, or tactical engagement guidance."

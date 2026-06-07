@@ -65,7 +65,7 @@ Apply migrations before using PostgreSQL mode. The app refuses to start with Pos
 
 Do not run destructive database operations against shared or production data without a backup or a documented preview. Retention pruning supports `GET /api/retention/preview`; use it before `POST /api/retention/prune`.
 
-See `docs/database.md` for migration gate behavior, test database workflow, and snapshot write reliability notes.
+See `docs/database.md` for migration gate behavior, test database workflow, and snapshot write reliability notes. See `docs/retention.md` for background retention, preview-first pruning, capacity limits, and sizing estimates.
 
 ## Compose Checks
 

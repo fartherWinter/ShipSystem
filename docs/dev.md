@@ -70,6 +70,15 @@ Run the optional Postgres integration test against an isolated Docker database:
 
 The script uses the `shipsim-test` Compose project and removes only that test project's containers and volume by default. See `docs/database.md` for details.
 
+Retention preview and capacity smoke commands:
+
+```powershell
+.\scripts\retention.ps1 -Days 30
+.\scripts\run-capacity-smoke.ps1 -EstimateOnly
+```
+
+See `docs/retention.md` for background retention, destructive-operation preview rules, and sizing estimates.
+
 ## Unified Commands
 
 With `make` available from the repository root:

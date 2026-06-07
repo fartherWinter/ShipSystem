@@ -350,6 +350,26 @@ func (m *Memory) PreviewPrune(_ context.Context, policy model.RetentionPolicy) (
 			}
 		}
 	}
+	if policy.MaxEventsPerRun > 0 {
+		for runID, events := range m.events {
+			if _, ok := matchedRuns[runID]; ok || !m.runOwnerMatches(runID, policy.OwnerID) {
+				continue
+			}
+			if len(events) > policy.MaxEventsPerRun {
+				preview.EventsMatched += int64(len(events) - policy.MaxEventsPerRun)
+			}
+		}
+	}
+	if policy.MaxSnapshotsPerRun > 0 {
+		for runID, frames := range m.snaps {
+			if _, ok := matchedRuns[runID]; ok || !m.runOwnerMatches(runID, policy.OwnerID) {
+				continue
+			}
+			if len(frames) > policy.MaxSnapshotsPerRun {
+				preview.SnapshotsMatched += int64(len(frames) - policy.MaxSnapshotsPerRun)
+			}
+		}
+	}
 	return preview, nil
 }
 
@@ -445,6 +465,38 @@ func (m *Memory) Prune(_ context.Context, policy model.RetentionPolicy) (model.R
 			deleteCount := len(points) - policy.MaxTrackPointsPerRun
 			result.TrackPointsDeleted += int64(deleteCount)
 			m.points[runID] = append([]model.TrackPoint(nil), points[deleteCount:]...)
+		}
+	}
+	if policy.MaxEventsPerRun > 0 {
+		for runID, events := range m.events {
+			if !m.runOwnerMatches(runID, policy.OwnerID) {
+				continue
+			}
+			if len(events) <= policy.MaxEventsPerRun {
+				continue
+			}
+			sort.SliceStable(events, func(i, j int) bool {
+				return events[i].OccurredAt.Before(events[j].OccurredAt)
+			})
+			deleteCount := len(events) - policy.MaxEventsPerRun
+			result.EventsDeleted += int64(deleteCount)
+			m.events[runID] = append([]model.SimEvent(nil), events[deleteCount:]...)
+		}
+	}
+	if policy.MaxSnapshotsPerRun > 0 {
+		for runID, frames := range m.snaps {
+			if !m.runOwnerMatches(runID, policy.OwnerID) {
+				continue
+			}
+			if len(frames) <= policy.MaxSnapshotsPerRun {
+				continue
+			}
+			sort.SliceStable(frames, func(i, j int) bool {
+				return frames[i].SampledAt.Before(frames[j].SampledAt)
+			})
+			deleteCount := len(frames) - policy.MaxSnapshotsPerRun
+			result.SnapshotsDeleted += int64(deleteCount)
+			m.snaps[runID] = append([]model.SnapshotFrame(nil), frames[deleteCount:]...)
 		}
 	}
 	return result, nil

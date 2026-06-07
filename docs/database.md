@@ -27,11 +27,11 @@ For Docker Compose, migrations are mounted into `/docker-entrypoint-initdb.d` an
 
 Do not run destructive operations against shared, staging, or production data without a backup or documented preview.
 
-- For retention, call `GET /api/retention/preview` before `POST /api/retention/prune`.
+- For retention, call `GET /api/retention/preview` before `POST /api/retention/prune`, or use `scripts/retention.ps1` without `-Apply`.
 - For manual SQL maintenance, record the intended SQL, expected row counts, and backup location before running `DELETE`, `DROP`, `TRUNCATE`, or migration rollback commands.
 - For production PostgreSQL, take a `pg_dump` or platform snapshot before destructive maintenance.
 
-The Postgres integration test script uses a separate Compose project named `shipsim-test` and removes only that project's test containers and volumes by default.
+The Postgres integration test script uses a separate Compose project named `shipsim-test` and removes only that project's test containers and volumes by default. See `docs/retention.md` for retention capacity limits and growth estimates.
 
 ## Postgres Integration Tests
 

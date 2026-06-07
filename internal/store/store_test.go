@@ -216,9 +216,58 @@ func testStoreContract(t *testing.T, st Store) {
 		t.Fatalf("expected one track point, got %d", len(points))
 	}
 
+	for i := 0; i < 2; i++ {
+		occurredAt := now.Add(time.Duration(i+1) * time.Millisecond)
+		event := model.SimEvent{
+			ID:         uuid.NewString(),
+			RunID:      runID,
+			OccurredAt: occurredAt,
+			Type:       "capacity_event",
+			Payload:    map[string]any{"index": i},
+		}
+		if err := st.SaveEvent(ctx, event); err != nil {
+			t.Fatalf("save capacity event: %v", err)
+		}
+		track.UpdatedAt = occurredAt
+		track.Position.Lon += 0.001
+		contact.Timestamp = occurredAt
+		contact.Position = track.Position
+		snapshot.Tick = int64(13 + i)
+		snapshot.Time = occurredAt
+		snapshot.Tracks = []model.Track{track}
+		snapshot.Contacts = []model.Contact{contact}
+		if err := st.SaveSnapshot(ctx, snapshot); err != nil {
+			t.Fatalf("save capacity snapshot: %v", err)
+		}
+	}
+	capacityPreview, err := st.PreviewPrune(ctx, model.RetentionPolicy{
+		MaxTrackPointsPerRun: 1,
+		MaxEventsPerRun:      1,
+		MaxSnapshotsPerRun:   1,
+	})
+	if err != nil {
+		t.Fatalf("preview capacity prune: %v", err)
+	}
+	if capacityPreview.EventsMatched < 2 || capacityPreview.TrackPointsMatched < 2 || capacityPreview.SnapshotsMatched < 2 {
+		t.Fatalf("expected capacity preview to match excess history, got %+v", capacityPreview)
+	}
+	capacityPruned, err := st.Prune(ctx, model.RetentionPolicy{
+		MaxTrackPointsPerRun: 1,
+		MaxEventsPerRun:      1,
+		MaxSnapshotsPerRun:   1,
+	})
+	if err != nil {
+		t.Fatalf("capacity prune: %v", err)
+	}
+	if capacityPruned.EventsDeleted < 2 || capacityPruned.TrackPointsDeleted < 2 || capacityPruned.SnapshotsDeleted < 2 {
+		t.Fatalf("expected capacity prune to delete excess history, got %+v", capacityPruned)
+	}
+
 	preview, err := st.PreviewPrune(ctx, model.RetentionPolicy{
 		Cutoff:               now.Add(time.Second),
 		MaxTrackPointsPerRun: 1000,
+		MaxEventsPerRun:      1000,
+		MaxSnapshotsPerRun:   1000,
 	})
 	if err != nil {
 		t.Fatalf("preview prune: %v", err)
@@ -230,6 +279,8 @@ func testStoreContract(t *testing.T, st Store) {
 	pruned, err := st.Prune(ctx, model.RetentionPolicy{
 		Cutoff:               now.Add(time.Second),
 		MaxTrackPointsPerRun: 1000,
+		MaxEventsPerRun:      1000,
+		MaxSnapshotsPerRun:   1000,
 	})
 	if err != nil {
 		t.Fatalf("prune: %v", err)

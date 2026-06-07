@@ -29,7 +29,10 @@ type Config struct {
 	StaticDir             string
 	RequestBodyLimit      int64
 	RetentionDays         int
+	RetentionInterval     time.Duration
 	MaxTrackPointsPerRun  int
+	MaxEventsPerRun       int
+	MaxSnapshotsPerRun    int
 	HTTPReadTimeout       time.Duration
 	HTTPReadHeaderTimeout time.Duration
 	HTTPWriteTimeout      time.Duration
@@ -47,7 +50,10 @@ func Default() Config {
 		ScenarioDir:           "scenarios",
 		RequestBodyLimit:      1 << 20,
 		RetentionDays:         0,
+		RetentionInterval:     0,
 		MaxTrackPointsPerRun:  0,
+		MaxEventsPerRun:       0,
+		MaxSnapshotsPerRun:    0,
 		HTTPReadTimeout:       10 * time.Second,
 		HTTPReadHeaderTimeout: 5 * time.Second,
 		HTTPWriteTimeout:      30 * time.Second,
@@ -76,7 +82,16 @@ func Load() (Config, error) {
 	if cfg.RetentionDays, err = intEnv("SHIP_SIM_RETENTION_DAYS", cfg.RetentionDays); err != nil {
 		parseErrs = append(parseErrs, err.Error())
 	}
+	if cfg.RetentionInterval, err = durationEnv("SHIP_SIM_RETENTION_INTERVAL", cfg.RetentionInterval); err != nil {
+		parseErrs = append(parseErrs, err.Error())
+	}
 	if cfg.MaxTrackPointsPerRun, err = intEnv("SHIP_SIM_MAX_TRACK_POINTS_PER_RUN", cfg.MaxTrackPointsPerRun); err != nil {
+		parseErrs = append(parseErrs, err.Error())
+	}
+	if cfg.MaxEventsPerRun, err = intEnv("SHIP_SIM_MAX_EVENTS_PER_RUN", cfg.MaxEventsPerRun); err != nil {
+		parseErrs = append(parseErrs, err.Error())
+	}
+	if cfg.MaxSnapshotsPerRun, err = intEnv("SHIP_SIM_MAX_SNAPSHOTS_PER_RUN", cfg.MaxSnapshotsPerRun); err != nil {
 		parseErrs = append(parseErrs, err.Error())
 	}
 	if cfg.HTTPReadTimeout, err = durationEnv("SHIP_SIM_HTTP_READ_TIMEOUT", cfg.HTTPReadTimeout); err != nil {
@@ -114,8 +129,17 @@ func (c Config) Validate() error {
 	if c.RetentionDays < 0 {
 		details = append(details, "SHIP_SIM_RETENTION_DAYS must be zero or greater")
 	}
+	if c.RetentionInterval < 0 {
+		details = append(details, "SHIP_SIM_RETENTION_INTERVAL must be zero or greater")
+	}
 	if c.MaxTrackPointsPerRun > 0 && c.MaxTrackPointsPerRun < 1000 {
 		details = append(details, "SHIP_SIM_MAX_TRACK_POINTS_PER_RUN must be zero or at least 1000")
+	}
+	if c.MaxEventsPerRun < 0 {
+		details = append(details, "SHIP_SIM_MAX_EVENTS_PER_RUN must be zero or greater")
+	}
+	if c.MaxSnapshotsPerRun > 0 && c.MaxSnapshotsPerRun < 1000 {
+		details = append(details, "SHIP_SIM_MAX_SNAPSHOTS_PER_RUN must be zero or at least 1000")
 	}
 	if c.HTTPReadTimeout <= 0 {
 		details = append(details, "SHIP_SIM_HTTP_READ_TIMEOUT must be greater than zero")

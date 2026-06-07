@@ -665,6 +665,34 @@ SELECT COUNT(*) FROM ranked WHERE rn > $1`, policy.MaxTrackPointsPerRun, policy.
 		}
 		preview.TrackPointsMatched += excess
 	}
+	if policy.MaxEventsPerRun > 0 {
+		var excess int64
+		if err := p.pool.QueryRow(ctx, `
+WITH ranked AS (
+	SELECT row_number() OVER (PARTITION BY e.run_id ORDER BY e.occurred_at DESC, e.id DESC) AS rn
+	FROM sim_events e
+	JOIN sim_runs r ON r.id=e.run_id
+	WHERE ($2 = '' OR r.owner_id = $2)
+)
+SELECT COUNT(*) FROM ranked WHERE rn > $1`, policy.MaxEventsPerRun, policy.OwnerID).Scan(&excess); err != nil {
+			return preview, err
+		}
+		preview.EventsMatched += excess
+	}
+	if policy.MaxSnapshotsPerRun > 0 {
+		var excess int64
+		if err := p.pool.QueryRow(ctx, `
+WITH ranked AS (
+	SELECT row_number() OVER (PARTITION BY s.run_id ORDER BY s.sampled_at DESC, s.id DESC) AS rn
+	FROM sim_snapshots s
+	JOIN sim_runs r ON r.id=s.run_id
+	WHERE ($2 = '' OR r.owner_id = $2)
+)
+SELECT COUNT(*) FROM ranked WHERE rn > $1`, policy.MaxSnapshotsPerRun, policy.OwnerID).Scan(&excess); err != nil {
+			return preview, err
+		}
+		preview.SnapshotsMatched += excess
+	}
 	return preview, nil
 }
 
@@ -751,6 +779,42 @@ WHERE track_points.id = ranked.id
 			return result, err
 		}
 		result.TrackPointsDeleted += tag.RowsAffected()
+	}
+	if policy.MaxEventsPerRun > 0 {
+		tag, err := p.pool.Exec(ctx, `
+WITH ranked AS (
+	SELECT e.id,
+		row_number() OVER (PARTITION BY e.run_id ORDER BY e.occurred_at DESC, e.id DESC) AS rn
+	FROM sim_events e
+	JOIN sim_runs r ON r.id=e.run_id
+	WHERE ($2 = '' OR r.owner_id = $2)
+)
+DELETE FROM sim_events
+USING ranked
+WHERE sim_events.id = ranked.id
+	AND ranked.rn > $1`, policy.MaxEventsPerRun, policy.OwnerID)
+		if err != nil {
+			return result, err
+		}
+		result.EventsDeleted += tag.RowsAffected()
+	}
+	if policy.MaxSnapshotsPerRun > 0 {
+		tag, err := p.pool.Exec(ctx, `
+WITH ranked AS (
+	SELECT s.id,
+		row_number() OVER (PARTITION BY s.run_id ORDER BY s.sampled_at DESC, s.id DESC) AS rn
+	FROM sim_snapshots s
+	JOIN sim_runs r ON r.id=s.run_id
+	WHERE ($2 = '' OR r.owner_id = $2)
+)
+DELETE FROM sim_snapshots
+USING ranked
+WHERE sim_snapshots.id = ranked.id
+	AND ranked.rn > $1`, policy.MaxSnapshotsPerRun, policy.OwnerID)
+		if err != nil {
+			return result, err
+		}
+		result.SnapshotsDeleted += tag.RowsAffected()
 	}
 	return result, nil
 }

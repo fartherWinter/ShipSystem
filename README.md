@@ -197,23 +197,31 @@ Snapshot and audit retention is disabled by default:
 
 ```powershell
 $env:SHIP_SIM_RETENTION_DAYS="0"
+$env:SHIP_SIM_RETENTION_INTERVAL="0s"
 $env:SHIP_SIM_MAX_TRACK_POINTS_PER_RUN="0"
+$env:SHIP_SIM_MAX_EVENTS_PER_RUN="0"
+$env:SHIP_SIM_MAX_SNAPSHOTS_PER_RUN="0"
 ```
 
 Set `SHIP_SIM_RETENTION_DAYS` to prune events, contacts, track points, and
-snapshots older than that cutoff at server startup. Set
-`SHIP_SIM_MAX_TRACK_POINTS_PER_RUN` to keep only the newest points per run. Use
-the preview API before a manual prune:
+snapshots older than that cutoff at server startup and every
+`SHIP_SIM_RETENTION_INTERVAL` when the interval is greater than zero. Set
+`SHIP_SIM_MAX_TRACK_POINTS_PER_RUN`, `SHIP_SIM_MAX_EVENTS_PER_RUN`, and
+`SHIP_SIM_MAX_SNAPSHOTS_PER_RUN` to keep only the newest rows per run. Use the
+preview API or operations script before a manual prune:
 
 ```powershell
 Invoke-RestMethod -Uri "http://localhost:8080/api/retention/preview?days=30"
 Invoke-RestMethod -Method Post -Uri "http://localhost:8080/api/retention/prune" -ContentType application/json -Body '{"days":30}'
+.\scripts\retention.ps1 -Days 30
 ```
 
 Manual retention also accepts `cutoff`, `ended_before`, and
-`max_track_points_per_run`. In token or proxy authentication mode, retention,
-run listing, run-scoped replay, report, event, track, and snapshot APIs are
-limited to the authenticated owner.
+`max_track_points_per_run`, `max_events_per_run`, and
+`max_snapshots_per_run`. In token or proxy authentication mode, retention, run
+listing, run-scoped replay, report, event, track, and snapshot APIs are limited
+to the authenticated owner. See `docs/retention.md` for capacity estimates and
+the 5/20/100 track smoke script.
 
 Security notes:
 
