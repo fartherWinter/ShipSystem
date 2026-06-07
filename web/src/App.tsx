@@ -4,7 +4,6 @@ import { ControlSidebar, type ReportExportFormat, type ReplaySpeed } from "./Con
 import { SimulationMap } from "./SimulationMap";
 import {
   ApiRequestError,
-  apiBase,
   commandRun,
   createWebSocketTicket,
   createRun,
@@ -24,6 +23,7 @@ import {
   submitTrainingAction,
   toWsUrl
 } from "./api";
+import { apiBase, authMode } from "./config";
 import type {
   ConnectionState,
   Run,
@@ -67,6 +67,8 @@ export function App() {
   const [authRequired, setAuthRequired] = useState(false);
   const [tokenInput, setTokenInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [replayLoading, setReplayLoading] = useState(false);
+  const [replayError, setReplayError] = useState("");
   const [streamAttempt, setStreamAttempt] = useState(0);
   const replayActiveRef = useRef(false);
 
@@ -189,13 +191,14 @@ export function App() {
     setTrackPoints([]);
     setStreamAttempt(0);
     setError("");
+    setReplayError("");
     const [nextZones, nextTracks, eventPage, nextReport] = await Promise.all([
       listZones(nextRun.id),
       listTracks(nextRun.id),
       listEvents(nextRun.id, 50),
       getRunReport(nextRun.id)
     ]);
-    const nextFrames = await loadSnapshotWindow(nextRun.id, nextReport, nextReport.snapshot_range?.to);
+    const nextFrames = await loadSnapshotWindowWithStatus(nextRun.id, nextReport, nextReport.snapshot_range?.to);
     setZones(nextZones);
     setTracks(nextTracks);
     setSnapshotFrames(nextFrames);
@@ -273,7 +276,7 @@ export function App() {
   async function refreshReplayData(runID: string) {
     const nextReport = await getRunReport(runID);
     const anchor = replayActiveRef.current ? replayFrame?.sampled_at : nextReport.snapshot_range?.to;
-    const nextFrames = await loadSnapshotWindow(runID, nextReport, anchor);
+    const nextFrames = await loadSnapshotWindowWithStatus(runID, nextReport, anchor);
     setSnapshotFrames(nextFrames);
     setReport(nextReport);
     setRun(nextReport.run);
@@ -313,7 +316,7 @@ export function App() {
     if (!run || !report?.snapshot_range) return;
     await withBusy(async () => {
       const anchor = boundary === "start" ? report.snapshot_range?.from : report.snapshot_range?.to;
-      const frames = await loadSnapshotWindow(run.id, report, anchor);
+      const frames = await loadSnapshotWindowWithStatus(run.id, report, anchor);
       const index = boundary === "start" ? 0 : Math.max(0, frames.length - 1);
       setSnapshotFrames(frames);
       setReplayIndex(index);
@@ -327,7 +330,7 @@ export function App() {
     if (!run || !report || report.replay_mode === "legacy") return;
     await withBusy(async () => {
       const nearest = await getNearestSnapshot(run.id, event.occurred_at);
-      const windowFrames = await loadSnapshotWindow(run.id, report, nearest.sampled_at);
+      const windowFrames = await loadSnapshotWindowWithStatus(run.id, report, nearest.sampled_at);
       const frames = mergeSnapshotFrames(windowFrames, [nearest]);
       const nextIndex = Math.max(0, frames.findIndex((frame) => frame.sampled_at === nearest.sampled_at && frame.tick === nearest.tick));
       setSnapshotFrames(frames);
@@ -335,6 +338,30 @@ export function App() {
       setReplayFrame(frames[nextIndex] ?? nearest);
       setReplayPlaying(false);
       setConnectionState("replay");
+    });
+  }
+
+  async function handleReplayWindow(direction: "previous" | "next") {
+    if (!run || !report?.snapshot_range || snapshotFrames.length === 0) return;
+    await withBusy(async () => {
+      const edge = direction === "previous" ? snapshotFrames[0]?.sampled_at : snapshotFrames[snapshotFrames.length - 1]?.sampled_at;
+      const edgeMS = edge ? new Date(edge).getTime() : NaN;
+      const anchorMS = direction === "previous" ? edgeMS - snapshotWindowMS : edgeMS + snapshotWindowMS;
+      const anchor = Number.isFinite(anchorMS) ? new Date(anchorMS).toISOString() : edge;
+      const frames = await loadSnapshotWindowWithStatus(run.id, report, anchor);
+      const nextIndex = direction === "previous" ? Math.max(0, frames.length - 1) : 0;
+      setSnapshotFrames(frames);
+      setReplayIndex(nextIndex);
+      setReplayFrame(frames[nextIndex] ?? null);
+      setReplayPlaying(false);
+      setConnectionState(frames.length > 0 ? "replay" : "idle");
+    });
+  }
+
+  async function handleReplayRetry() {
+    if (!run) return;
+    await withBusy(async () => {
+      await refreshReplayData(run.id);
     });
   }
 
@@ -364,6 +391,19 @@ export function App() {
     }
   }
 
+  async function loadSnapshotWindowWithStatus(runID: string, nextReport: RunReport, anchor?: string) {
+    setReplayLoading(true);
+    setReplayError("");
+    try {
+      return await loadSnapshotWindow(runID, nextReport, anchor);
+    } catch (err) {
+      setReplayError(errorMessage(err));
+      throw err;
+    } finally {
+      setReplayLoading(false);
+    }
+  }
+
   async function handleLogin() {
     if (tokenInput.trim()) {
       setApiToken(tokenInput);
@@ -384,6 +424,7 @@ export function App() {
     setReplayFrame(null);
     setReplayIndex(0);
     setReplayPlaying(false);
+    setReplayError("");
     setTracks([]);
     setReport(null);
     setEvents([]);
@@ -394,14 +435,14 @@ export function App() {
   function handleError(err: unknown) {
     if (err instanceof ApiRequestError && err.status === 401) {
       setAuthRequired(true);
-      setError("Sign in with an access token to use this deployment.");
+      setError(authMode === "proxy" ? "Open this deployment through the authenticated proxy." : "Sign in with an access token to use this deployment.");
       return;
     }
     if (err instanceof ApiRequestError && (err.status === 403 || err.status === 404)) {
       setError("No access to this resource, or it no longer exists.");
       return;
     }
-    setError(err instanceof Error ? err.message : "Request failed.");
+    setError(errorMessage(err));
   }
 
   function prependLocalEvent(message: string, runID = run?.id ?? "") {
@@ -432,9 +473,12 @@ export function App() {
         visibleTrackCount={visibleTracks.length}
         threatFilter={threatFilter}
         authRequired={authRequired}
+        authMode={authMode}
         tokenInput={tokenInput}
         connectionState={connectionState}
         events={events}
+        replayLoading={replayLoading}
+        replayError={replayError}
         error={error}
         busy={busy}
         onCreateRun={handleCreateRun}
@@ -447,6 +491,8 @@ export function App() {
         onReplayIndex={handleReplayIndex}
         onReplayStep={handleReplayStep}
         onReplayBoundary={handleReplayBoundary}
+        onReplayWindow={handleReplayWindow}
+        onReplayRetry={handleReplayRetry}
         onReplayPlayToggle={handleReplayPlayToggle}
         onReplaySpeed={setReplaySpeed}
         onJumpToEvent={handleJumpToEvent}
@@ -603,6 +649,10 @@ function snapshotFromFrame(frame: SnapshotFrame): Snapshot {
 
 function shortID(id: string) {
   return id.slice(0, 8);
+}
+
+function errorMessage(err: unknown) {
+  return err instanceof Error ? err.message : "Request failed.";
 }
 
 function saveBlob(blob: Blob, filename: string) {

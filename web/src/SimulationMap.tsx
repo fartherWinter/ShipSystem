@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import maplibregl, { GeoJSONSource, Map } from "maplibre-gl";
+import { mapTileAttribution, mapTileUrl } from "./config";
 import { trackHistoryToFeatureCollection, tracksToFeatureCollection, zonesToFeatureCollection } from "./mapData";
 import type { Track, TrackPoint, Vec3, Zone } from "./types";
 
@@ -17,6 +18,7 @@ export function SimulationMap({ center, tracks, trackPoints, zones, selectedTrac
   const mapRef = useRef<Map | null>(null);
   const tracksRef = useRef<Track[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [mapError, setMapError] = useState("");
 
   tracksRef.current = tracks;
 
@@ -29,9 +31,9 @@ export function SimulationMap({ center, tracks, trackPoints, zones, selectedTrac
         sources: {
           osm: {
             type: "raster",
-            tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+            tiles: [mapTileUrl],
             tileSize: 256,
-            attribution: "OpenStreetMap"
+            attribution: mapTileAttribution
           }
         },
         layers: [{ id: "osm", type: "raster", source: "osm" }]
@@ -41,6 +43,9 @@ export function SimulationMap({ center, tracks, trackPoints, zones, selectedTrac
     });
 
     map.addControl(new maplibregl.NavigationControl(), "top-right");
+    map.on("error", () => {
+      setMapError("Map tiles are unavailable.");
+    });
     map.on("load", () => {
       map.addSource("zones", {
         type: "geojson",
@@ -119,6 +124,7 @@ export function SimulationMap({ center, tracks, trackPoints, zones, selectedTrac
         map.getCanvas().style.cursor = "";
       });
       setLoaded(true);
+      setMapError("");
     });
     mapRef.current = map;
     return () => {
@@ -177,5 +183,19 @@ export function SimulationMap({ center, tracks, trackPoints, zones, selectedTrac
     }
   }, [loaded, selectedTrackID, tracks]);
 
-  return <div ref={mapEl} className="map" />;
+  return (
+    <div className="mapFrame">
+      <div ref={mapEl} className="map" />
+      {!loaded && !mapError ? (
+        <div className="mapStatus" role="status">
+          Loading map
+        </div>
+      ) : null}
+      {mapError ? (
+        <div className="mapStatus mapStatusError" role="alert">
+          {mapError}
+        </div>
+      ) : null}
+    </div>
+  );
 }

@@ -11,8 +11,10 @@ import type {
   TrainingAction,
   Zone
 } from "./types";
+import { apiBase } from "./config";
 
-export const apiBase = import.meta.env.VITE_API_BASE ?? "http://localhost:8080";
+export { apiBase } from "./config";
+
 const tokenStorageKey = "ship-sim-api-token";
 let apiToken = loadStoredToken();
 

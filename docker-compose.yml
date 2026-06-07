@@ -1,6 +1,12 @@
 services:
   app:
-    build: .
+    build:
+      context: .
+      args:
+        FRONTEND_API_BASE: ${VITE_API_BASE:-}
+        FRONTEND_MODE: ${VITE_AUTH_MODE:-}
+        FRONTEND_MAP_TILE_URL: ${VITE_MAP_TILE_URL:-}
+        FRONTEND_MAP_TILE_ATTRIBUTION: ${VITE_MAP_TILE_ATTRIBUTION:-}
     depends_on:
       db:
         condition: service_healthy

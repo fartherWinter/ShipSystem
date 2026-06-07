@@ -39,11 +39,21 @@ Install dependencies and start Vite:
 
 ```powershell
 cd web
+Copy-Item .env.example .env.local
 npm ci
 npm run dev
 ```
 
 The default frontend development URL is `http://127.0.0.1:5173`. Keep `SHIP_SIM_ALLOWED_ORIGINS` aligned with the browser origin used during development.
+
+Frontend runtime settings are Vite build-time variables:
+
+- `VITE_API_BASE`: backend API origin, default `http://localhost:8080`.
+- `VITE_AUTH_MODE`: UI mode for authentication prompts, one of `off`, `token`, or `proxy`.
+- `VITE_MAP_TILE_URL`: MapLibre raster tile template, for example `https://tile.openstreetmap.org/{z}/{x}/{y}.png` or an internal tile server.
+- `VITE_MAP_TILE_ATTRIBUTION`: attribution text shown by MapLibre.
+
+For disconnected or intranet deployments, set `VITE_MAP_TILE_URL` to a local tile server before running `npm run build` or `docker compose build`. If map tiles fail to load, the UI shows a map error overlay instead of leaving the map blank.
 
 ## Database
 

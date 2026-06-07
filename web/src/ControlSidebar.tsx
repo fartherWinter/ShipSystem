@@ -1,6 +1,8 @@
 import { useMemo, useState } from "react";
 import {
   Activity,
+  ChevronLeft,
+  ChevronRight,
   Clock,
   Database,
   Download,
@@ -11,6 +13,7 @@ import {
   Pause,
   Play,
   Radio,
+  RefreshCw,
   Route,
   Shield,
   SkipBack,
@@ -21,6 +24,7 @@ import {
   Waves,
   Zap
 } from "lucide-react";
+import type { FrontendAuthMode } from "./config";
 import type { ConnectionState, Run, RunReport, ScenarioSummary, SimEvent, Snapshot, SnapshotFrame, Track, TrainingAction } from "./types";
 import { trainingActions } from "./types";
 
@@ -46,9 +50,12 @@ type ControlSidebarProps = {
   visibleTrackCount: number;
   threatFilter: ThreatFilter;
   authRequired: boolean;
+  authMode: FrontendAuthMode;
   tokenInput: string;
   connectionState: ConnectionState;
   events: SimEvent[];
+  replayLoading: boolean;
+  replayError: string;
   error: string;
   busy: boolean;
   onCreateRun: () => void;
@@ -61,6 +68,8 @@ type ControlSidebarProps = {
   onReplayIndex: (index: number) => void;
   onReplayStep: (delta: number) => void;
   onReplayBoundary: (boundary: "start" | "end") => void;
+  onReplayWindow: (direction: "previous" | "next") => void;
+  onReplayRetry: () => void;
   onReplayPlayToggle: () => void;
   onReplaySpeed: (speed: ReplaySpeed) => void;
   onJumpToEvent: (event: SimEvent) => void;
@@ -87,9 +96,12 @@ export function ControlSidebar({
   visibleTrackCount,
   threatFilter,
   authRequired,
+  authMode,
   tokenInput,
   connectionState,
   events,
+  replayLoading,
+  replayError,
   error,
   busy,
   onCreateRun,
@@ -102,6 +114,8 @@ export function ControlSidebar({
   onReplayIndex,
   onReplayStep,
   onReplayBoundary,
+  onReplayWindow,
+  onReplayRetry,
   onReplayPlayToggle,
   onReplaySpeed,
   onJumpToEvent,
@@ -124,14 +138,23 @@ export function ControlSidebar({
   const activeReplayFrame = replayFrame ?? snapshotFrames[replayIndex] ?? null;
   const replayTime = activeReplayFrame ? formatTime(activeReplayFrame.sampled_at) : "No frames";
   const frameLabel = canReplay ? `${Math.min(replayIndex + 1, snapshotFrames.length)} / ${snapshotFrames.length}` : "0 / 0";
+  const replayRange = report?.snapshot_range;
+  const replayWindowStart = snapshotFrames[0]?.sampled_at;
+  const replayWindowEnd = snapshotFrames[snapshotFrames.length - 1]?.sampled_at;
+  const rangeLabel = replayRange ? `${formatShortTime(replayRange.from)} - ${formatShortTime(replayRange.to)}` : "No snapshot range";
+  const windowLabel =
+    replayWindowStart && replayWindowEnd ? `${formatShortTime(replayWindowStart)} - ${formatShortTime(replayWindowEnd)}` : "No window loaded";
   const reportEvents = report?.events?.length ? report.events : events;
   const actionOptions = useMemo(() => uniqueActions(reportEvents), [reportEvents]);
   const filteredEvents = useMemo(
     () => filterEvents(reportEvents, actionFilter, severityFilter, fromFilter, toFilter),
     [reportEvents, actionFilter, severityFilter, fromFilter, toFilter]
   );
-  const replayDisabled = !canReplay || busy;
+  const replayDisabled = !canReplay || busy || replayLoading;
   const legacyReplay = report?.replay_mode === "legacy";
+  const replayProgress = replayRange ? timelineProgress(replayRange.from, replayRange.to, activeReplayFrame?.sampled_at) : 0;
+  const canPagePrevious = canPageWindow(replayRange?.from, replayWindowStart, "previous") && !replayDisabled && !legacyReplay;
+  const canPageNext = canPageWindow(replayRange?.to, replayWindowEnd, "next") && !replayDisabled && !legacyReplay;
 
   return (
     <aside className="sidebar">
@@ -148,7 +171,7 @@ export function ControlSidebar({
         <span>{connectionLabel(connectionState)}</span>
       </section>
 
-      {authRequired ? (
+      {authRequired && authMode === "token" ? (
         <section className="authPanel">
           <h2>Access</h2>
           <input
@@ -161,6 +184,21 @@ export function ControlSidebar({
           <div className="toolbar">
             <button onClick={onLogin} disabled={busy || tokenInput.trim() === ""}>
               <LogIn size={16} /> Sign in
+            </button>
+            <button onClick={onLogout} disabled={busy}>
+              <LogOut size={16} /> Clear
+            </button>
+          </div>
+        </section>
+      ) : null}
+
+      {authRequired && authMode !== "token" ? (
+        <section className="authPanel">
+          <h2>Access</h2>
+          <p className="emptyLine">{authMode === "proxy" ? "Authenticated proxy session required" : "Access denied"}</p>
+          <div className="toolbar">
+            <button onClick={onLogin} disabled={busy}>
+              <RefreshCw size={16} /> Retry
             </button>
             <button onClick={onLogout} disabled={busy}>
               <LogOut size={16} /> Clear
@@ -219,8 +257,28 @@ export function ControlSidebar({
         </div>
         <div className="replayMeta">
           <Clock size={16} />
-          <span>{canReplay ? `${replayTime} - lazy window` : "Legacy history only"}</span>
+          <span>{canReplay ? `${replayTime} - windowed replay` : "Legacy history only"}</span>
         </div>
+        <div className="replayTimeline">
+          <div>
+            <span>Range</span>
+            <b>{rangeLabel}</b>
+          </div>
+          <div>
+            <span>Window</span>
+            <b>{windowLabel}</b>
+          </div>
+          <progress max="100" value={replayProgress} aria-label="Replay timeline progress" />
+        </div>
+        {replayLoading ? <p className="replayStatus">Loading replay window</p> : null}
+        {replayError ? (
+          <div className="replayError">
+            <span>{replayError}</span>
+            <button onClick={onReplayRetry} disabled={busy || replayLoading}>
+              <RefreshCw size={14} /> Retry
+            </button>
+          </div>
+        ) : null}
         <div className="replayButtons">
           <button onClick={() => onReplayBoundary("start")} disabled={replayDisabled} aria-label="Jump to start">
             <SkipBack size={16} />
@@ -237,6 +295,14 @@ export function ControlSidebar({
           </button>
           <button onClick={() => onReplayBoundary("end")} disabled={replayDisabled} aria-label="Jump to end">
             <SkipForward size={16} />
+          </button>
+        </div>
+        <div className="replayWindowButtons">
+          <button onClick={() => onReplayWindow("previous")} disabled={!canPagePrevious}>
+            <ChevronLeft size={16} /> Previous window
+          </button>
+          <button onClick={() => onReplayWindow("next")} disabled={!canPageNext}>
+            Next window <ChevronRight size={16} />
           </button>
         </div>
         <div className="replaySpeed">
@@ -470,9 +536,31 @@ function formatTime(value?: string) {
   return new Date(value).toLocaleTimeString();
 }
 
+function formatShortTime(value?: string) {
+  if (!value) return "-";
+  return new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
 function formatInterval(value?: number) {
   if (value === undefined || value === null || !Number.isFinite(value)) return "-";
   return Math.round(value).toString();
+}
+
+function timelineProgress(from: string, to: string, current?: string) {
+  if (!current) return 0;
+  const fromMS = new Date(from).getTime();
+  const toMS = new Date(to).getTime();
+  const currentMS = new Date(current).getTime();
+  if (!Number.isFinite(fromMS) || !Number.isFinite(toMS) || !Number.isFinite(currentMS) || toMS <= fromMS) return 0;
+  return Math.max(0, Math.min(100, ((currentMS - fromMS) / (toMS - fromMS)) * 100));
+}
+
+function canPageWindow(boundary?: string, edge?: string, direction?: "previous" | "next") {
+  if (!boundary || !edge || !direction) return false;
+  const boundaryMS = new Date(boundary).getTime();
+  const edgeMS = new Date(edge).getTime();
+  if (!Number.isFinite(boundaryMS) || !Number.isFinite(edgeMS)) return false;
+  return direction === "previous" ? edgeMS > boundaryMS : edgeMS < boundaryMS;
 }
 
 function Metric({ label, value }: { label: string; value: string }) {

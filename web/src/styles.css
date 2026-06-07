@@ -225,6 +225,73 @@ button:focus-visible {
   font-size: 13px;
 }
 
+.replayTimeline {
+  display: grid;
+  gap: 6px;
+  border: 1px solid #d9e1e9;
+  background: #ffffff;
+  border-radius: 7px;
+  padding: 8px;
+}
+
+.replayTimeline div {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+}
+
+.replayTimeline span,
+.replayStatus {
+  color: #65758a;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.replayTimeline b {
+  min-width: 0;
+  color: #102033;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.replayTimeline progress {
+  width: 100%;
+  height: 8px;
+  accent-color: #2d6a4f;
+}
+
+.replayStatus {
+  margin: 0;
+  border: 1px solid #c7d7ec;
+  background: #eef5ff;
+  border-radius: 6px;
+  padding: 7px 8px;
+}
+
+.replayError {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  border: 1px solid #efb5ad;
+  background: #fff1ef;
+  color: #a13225;
+  border-radius: 7px;
+  padding: 8px;
+  font-size: 13px;
+}
+
+.replayError span {
+  overflow-wrap: anywhere;
+}
+
+.replayError button {
+  min-height: 30px;
+  padding: 0 9px;
+  font-size: 12px;
+}
+
 .replayPanel input[type="range"] {
   padding: 0;
 }
@@ -243,6 +310,19 @@ button:focus-visible {
 
 .replayButtons .playButton {
   padding: 0 10px;
+}
+
+.replayWindowButtons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.replayWindowButtons button {
+  min-width: 0;
+  min-height: 34px;
+  padding: 0 8px;
+  font-size: 12px;
 }
 
 .replaySpeed {
@@ -480,9 +560,37 @@ button:focus-visible {
   overflow: hidden;
 }
 
+.mapFrame {
+  position: absolute;
+  inset: 0;
+}
+
 .map {
   position: absolute;
   inset: 0;
+}
+
+.mapStatus {
+  position: absolute;
+  left: 16px;
+  top: 16px;
+  max-width: min(360px, calc(100% - 32px));
+  border: 1px solid #c7d7ec;
+  background: rgba(238, 245, 255, 0.96);
+  color: #245a94;
+  border-radius: 7px;
+  padding: 9px 11px;
+  font-size: 13px;
+  font-weight: 700;
+  box-shadow: 0 10px 24px rgba(16, 32, 51, 0.14);
+  overflow-wrap: anywhere;
+  z-index: 2;
+}
+
+.mapStatusError {
+  border-color: #efb5ad;
+  background: rgba(255, 241, 239, 0.96);
+  color: #a13225;
 }
 
 .trackList {

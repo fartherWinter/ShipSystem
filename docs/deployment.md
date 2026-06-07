@@ -12,6 +12,24 @@ Use the examples as templates only. Do not commit real secrets.
 
 The Compose defaults are intentionally development-oriented. They no longer default to `SHIP_SIM_ENV=production`, token auth, or a production-looking placeholder token. Production deployments must provide an explicit environment file or platform configuration.
 
+## Frontend Build Configuration
+
+The React frontend is built by Vite, so these settings are embedded when `npm run build` or the Docker `web-build` stage runs:
+
+- `VITE_API_BASE`: public browser-facing API origin, such as `https://training.example.com`.
+- `VITE_AUTH_MODE`: `off` for local demos, `token` for simple token demos, or `proxy` for authenticated reverse-proxy deployments.
+- `VITE_MAP_TILE_URL`: raster tile URL template. Use an internal tile server for disconnected or intranet deployments.
+- `VITE_MAP_TILE_ATTRIBUTION`: attribution for the configured tile source.
+
+`docker-compose.yml` passes these values as build args. Rebuild the image after changing them:
+
+```powershell
+docker compose build app
+docker compose up -d
+```
+
+Do not rely on public OpenStreetMap tiles in production environments that must operate without public internet access. Provide a local or internal tile service and set `VITE_MAP_TILE_URL` before building the frontend.
+
 ## Secrets
 
 Recommended secret sources:

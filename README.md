@@ -103,6 +103,20 @@ manager values, set a narrow `SHIP_SIM_ALLOWED_ORIGINS`, and choose token or
 proxy authentication explicitly. See `docs/deployment.md` for secret management,
 HTTP timeout, graceful shutdown, and Compose validation guidance.
 
+The frontend uses Vite build-time settings for the browser API base,
+authentication prompt mode, and MapLibre raster tile source:
+
+```powershell
+$env:VITE_API_BASE="https://training.example.com"
+$env:VITE_AUTH_MODE="proxy"
+$env:VITE_MAP_TILE_URL="https://tiles.internal.example/{z}/{x}/{y}.png"
+$env:VITE_MAP_TILE_ATTRIBUTION="Internal training map tiles"
+```
+
+Set `VITE_MAP_TILE_URL` to a local or internal tile server before building when
+the deployment must run without public internet access. The UI displays a map
+error state if configured tiles cannot be loaded.
+
 The Compose file runs the app and PostGIS. The migrations are mounted into
 `/docker-entrypoint-initdb.d` and are applied when the database volume is first
 created. For an existing database, apply `migrations/001_init.sql` and then
