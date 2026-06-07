@@ -1,0 +1,41 @@
+services:
+  app:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      SHIP_SIM_ENV: ${SHIP_SIM_ENV:-production}
+      SHIP_SIM_ADDR: ${SHIP_SIM_ADDR:-:8080}
+      SHIP_SIM_DATABASE_URL: ${SHIP_SIM_DATABASE_URL:-postgres://shipsim:shipsim@db:5432/shipsim?sslmode=disable}
+      SHIP_SIM_ALLOWED_ORIGINS: ${SHIP_SIM_ALLOWED_ORIGINS:-http://localhost:8080}
+      SHIP_SIM_AUTH_MODE: ${SHIP_SIM_AUTH_MODE:-token}
+      SHIP_SIM_AUTH_TOKEN: ${SHIP_SIM_AUTH_TOKEN:-change-this-before-deploying}
+      SHIP_SIM_AUTH_USER_HEADER: ${SHIP_SIM_AUTH_USER_HEADER:-X-Forwarded-User}
+      SHIP_SIM_STATIC_DIR: ${SHIP_SIM_STATIC_DIR:-/app/web}
+      SHIP_SIM_SCENARIO_DIR: ${SHIP_SIM_SCENARIO_DIR:-/app/scenarios}
+      SHIP_SIM_REQUEST_BODY_LIMIT: ${SHIP_SIM_REQUEST_BODY_LIMIT:-1048576}
+      SHIP_SIM_RETENTION_DAYS: ${SHIP_SIM_RETENTION_DAYS:-30}
+      SHIP_SIM_MAX_TRACK_POINTS_PER_RUN: ${SHIP_SIM_MAX_TRACK_POINTS_PER_RUN:-250000}
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+  db:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-shipsim}
+      POSTGRES_USER: ${POSTGRES_USER:-shipsim}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-shipsim}
+    volumes:
+      - ship-sim-db:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-shipsim} -d ${POSTGRES_DB:-shipsim}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  ship-sim-db:

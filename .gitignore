@@ -1,0 +1,17 @@
+# Go build outputs
+/sim-server
+/sim-server.exe
+*.test
+
+# Frontend dependencies and builds
+node_modules/
+web/node_modules/
+web/dist/
+
+# Local run artifacts
+outputs/
+
+# Local environment
+.env
+.env.*
+!.env.example

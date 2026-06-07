@@ -1,0 +1,40 @@
+{
+  "id": "demo",
+  "name": "demo-training-scenario",
+  "description": "Default simulated training scenario for local and cloud demos.",
+  "version": 1,
+  "seed": 20260605,
+  "tick_hz": 20,
+  "snapshot_hz": 10,
+  "initial_contacts": 5,
+  "ownship": {
+    "lon": 121.5,
+    "lat": 31.2,
+    "alt_m": 0
+  },
+  "sensors": [
+    {
+      "id": "sim-sensor-1",
+      "name": "Simulated Search Sensor",
+      "kind": "simulated_sensor",
+      "position": {
+        "lon": 121.5,
+        "lat": 31.2,
+        "alt_m": 0
+      }
+    }
+  ],
+  "zones": [
+    {
+      "id": "training-area",
+      "name": "Training Area",
+      "kind": "exercise_boundary",
+      "polygon": [
+        { "lon": 121.1, "lat": 30.9, "alt_m": 0 },
+        { "lon": 121.9, "lat": 30.9, "alt_m": 0 },
+        { "lon": 121.9, "lat": 31.6, "alt_m": 0 },
+        { "lon": 121.1, "lat": 31.6, "alt_m": 0 }
+      ]
+    }
+  ]
+}
