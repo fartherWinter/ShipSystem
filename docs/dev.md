@@ -99,6 +99,15 @@ Invoke-WebRequest -Uri http://localhost:8080/metrics/prometheus
 
 See `docs/observability.md` for metrics, probe authentication, and log field guidance.
 
+API contract and generated frontend types:
+
+```powershell
+cd web
+npm run generate:types
+```
+
+The source contract is `docs/openapi.json`; generated frontend API types are written to `web/src/generated/api-types.ts`. See `docs/api.md` for versioning and error-code policy.
+
 ## Unified Commands
 
 With `make` available from the repository root:
@@ -110,6 +119,7 @@ make build
 make lint
 make docker-build
 make postgres-test
+make api-types
 ```
 
 The targets expand to the same underlying commands:
@@ -119,6 +129,7 @@ The targets expand to the same underlying commands:
 - `lint`: `go vet ./...` and frontend type checking.
 - `docker-build`: local Docker image build, default tag `shipsim:local`.
 - `postgres-test`: isolated PostGIS store contract test using `docker-compose.test.yml`.
+- `api-types`: generate frontend TypeScript API types from `docs/openapi.json`.
 - `dev`: backend and Vite frontend development servers.
 
 On systems without `make`, run the underlying Go, npm, and Docker commands directly.

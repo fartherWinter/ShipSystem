@@ -2,9 +2,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "typecheck": "tsc --noEmit",
+    "generate:types": "node ../scripts/generate-openapi-types.mjs ../docs/openapi.json src/generated/api-types.ts",
+    "typecheck": "npm run generate:types && tsc --noEmit",
     "test": "vitest run",
-    "build": "tsc --noEmit && vite build",
+    "build": "npm run generate:types && tsc --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {

@@ -6,7 +6,7 @@ IMAGE ?= shipsim:local
 POSTGRES_TEST_PROJECT ?= shipsim-test
 POSTGRES_TEST_DSN ?= postgres://shipsim_test:shipsim-test-only@127.0.0.1:15432/shipsim_test?sslmode=disable
 
-.PHONY: dev test build lint docker-build postgres-test backend-dev frontend-dev frontend-install
+.PHONY: dev test build lint docker-build postgres-test api-types backend-dev frontend-dev frontend-install
 
 dev:
 	@echo "Starting backend on $${SHIP_SIM_ADDR:-:8080} and frontend on http://127.0.0.1:5173"
@@ -23,6 +23,9 @@ build:
 lint:
 	go vet ./...
 	cd $(WEB_DIR) && npm run typecheck
+
+api-types:
+	cd $(WEB_DIR) && npm run generate:types
 
 docker-build:
 	docker build -t $(IMAGE) .

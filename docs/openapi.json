@@ -1,0 +1,1624 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "ShipSystem Training Simulation API",
+    "version": "1.0.0",
+    "description": "Training, demonstration, replay, and audit API only. This contract does not define any real weapon-control, fire-control, electronic-warfare, or radar control interface."
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8080",
+      "description": "Local development"
+    }
+  ],
+  "security": [
+    {},
+    {
+      "BearerAuth": []
+    },
+    {
+      "ShipSimToken": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Runs"
+    },
+    {
+      "name": "Scenarios"
+    },
+    {
+      "name": "Replay"
+    },
+    {
+      "name": "Reports"
+    },
+    {
+      "name": "Operations"
+    }
+  ],
+  "paths": {
+    "/healthz": {
+      "get": {
+        "tags": ["Operations"],
+        "summary": "Liveness probe",
+        "responses": {
+          "200": {
+            "description": "Process is alive",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/readyz": {
+      "get": {
+        "tags": ["Operations"],
+        "summary": "Readiness probe",
+        "responses": {
+          "200": {
+            "description": "Store is ready and migrations are current",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadyResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/metrics": {
+      "get": {
+        "tags": ["Operations"],
+        "summary": "JSON metrics snapshot",
+        "responses": {
+          "200": {
+            "description": "Metrics snapshot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetricsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/metrics/prometheus": {
+      "get": {
+        "tags": ["Operations"],
+        "summary": "Prometheus metrics",
+        "responses": {
+          "200": {
+            "description": "Prometheus text exposition",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/scenarios": {
+      "get": {
+        "tags": ["Scenarios"],
+        "summary": "List scenario summaries",
+        "responses": {
+          "200": {
+            "description": "Available scenarios",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ScenarioSummary"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/scenarios/{scenario_id}": {
+      "get": {
+        "tags": ["Scenarios"],
+        "summary": "Get one scenario",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ScenarioID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Scenario",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Scenario"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/runs": {
+      "get": {
+        "tags": ["Runs"],
+        "summary": "List runs",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Limit"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Recent runs visible to the caller",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Run"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": ["Runs"],
+        "summary": "Create a training run",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRunRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Run"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/runs/{run_id}": {
+      "get": {
+        "tags": ["Runs"],
+        "summary": "Get one run",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Run"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/runs/{run_id}/start": {
+      "post": {
+        "tags": ["Runs"],
+        "summary": "Start a run",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Run"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/runs/{run_id}/pause": {
+      "post": {
+        "tags": ["Runs"],
+        "summary": "Pause a run",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Run"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/runs/{run_id}/stop": {
+      "post": {
+        "tags": ["Runs"],
+        "summary": "Stop a run",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Run"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/runs/{run_id}/actions": {
+      "post": {
+        "tags": ["Runs"],
+        "summary": "Submit an abstract training action",
+        "description": "The action records training/audit behavior only. It does not command any external device.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Action"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted training action event",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimEvent"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/runs/{run_id}/tracks": {
+      "get": {
+        "tags": ["Replay"],
+        "summary": "List current tracks",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Tracks",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Track"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/runs/{run_id}/zones": {
+      "get": {
+        "tags": ["Replay"],
+        "summary": "List zones for a run",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Zones",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Zone"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/runs/{run_id}/events": {
+      "get": {
+        "tags": ["Replay"],
+        "summary": "List paged audit events",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunID"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paged events",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventPage"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/runs/{run_id}/snapshots": {
+      "get": {
+        "tags": ["Replay"],
+        "summary": "List snapshot frames",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunID"
+          },
+          {
+            "$ref": "#/components/parameters/FromTime"
+          },
+          {
+            "$ref": "#/components/parameters/ToTime"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Snapshot frames",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SnapshotFrame"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/runs/{run_id}/snapshots/nearest": {
+      "get": {
+        "tags": ["Replay"],
+        "summary": "Get nearest snapshot frame",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunID"
+          },
+          {
+            "name": "at",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Nearest snapshot frame",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SnapshotFrame"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/runs/{run_id}/track-points": {
+      "get": {
+        "tags": ["Replay"],
+        "summary": "List track point history",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunID"
+          },
+          {
+            "name": "track_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/FromTime"
+          },
+          {
+            "$ref": "#/components/parameters/ToTime"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Track points",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TrackPoint"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/runs/{run_id}/replay": {
+      "get": {
+        "tags": ["Replay"],
+        "summary": "Legacy replay event list",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunID"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Legacy replay events",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SimEvent"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/runs/{run_id}/report": {
+      "get": {
+        "tags": ["Reports"],
+        "summary": "Get or export a training report",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunID"
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["json", "csv"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Training report",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunReport"
+                }
+              },
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/runs/{run_id}/ws-ticket": {
+      "post": {
+        "tags": ["Replay"],
+        "summary": "Create a short-lived WebSocket ticket",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunID"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "One-time WebSocket ticket",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebSocketTicket"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ws/runs/{run_id}": {
+      "get": {
+        "tags": ["Replay"],
+        "summary": "Snapshot WebSocket stream",
+        "description": "Authenticated deployments require a short-lived one-time ticket query value from POST /api/runs/{run_id}/ws-ticket.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunID"
+          },
+          {
+            "name": "ticket",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "101": {
+            "description": "WebSocket upgrade. Messages are WebSocketSnapshotMessage JSON values."
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/retention/preview": {
+      "get": {
+        "tags": ["Operations"],
+        "summary": "Preview retention pruning",
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "cutoff",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "ended_before",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "max_track_points_per_run",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "max_events_per_run",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "max_snapshots_per_run",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Rows that would be pruned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetentionPreview"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/retention/prune": {
+      "post": {
+        "tags": ["Operations"],
+        "summary": "Apply retention pruning",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetentionPolicyInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Rows pruned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetentionResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      },
+      "ShipSimToken": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Ship-Sim-Token"
+      }
+    },
+    "parameters": {
+      "RunID": {
+        "name": "run_id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "ScenarioID": {
+        "name": "scenario_id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "Limit": {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "FromTime": {
+        "name": "from",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "ToTime": {
+        "name": "to",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "responses": {
+      "Run": {
+        "description": "Run",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Run"
+            }
+          }
+        }
+      },
+      "Error": {
+        "description": "Error response",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "Vec3": {
+        "type": "object",
+        "required": ["lon", "lat", "alt_m"],
+        "properties": {
+          "lon": {
+            "type": "number"
+          },
+          "lat": {
+            "type": "number"
+          },
+          "alt_m": {
+            "type": "number"
+          }
+        }
+      },
+      "RunStatus": {
+        "type": "string",
+        "enum": ["created", "running", "paused", "stopped"]
+      },
+      "ThreatLevel": {
+        "type": "string",
+        "enum": ["low", "medium", "high"]
+      },
+      "TrainingAction": {
+        "type": "string",
+        "enum": ["maneuver", "decoy", "training_response"]
+      },
+      "Sensor": {
+        "type": "object",
+        "required": ["id", "name", "kind", "position"],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "position": {
+            "$ref": "#/components/schemas/Vec3"
+          }
+        }
+      },
+      "Zone": {
+        "type": "object",
+        "required": ["id", "name", "kind", "polygon"],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "polygon": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Vec3"
+            }
+          }
+        }
+      },
+      "Contact": {
+        "type": "object",
+        "required": ["id", "sensor_id", "timestamp", "position", "velocity", "confidence", "kind"],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "sensor_id": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "position": {
+            "$ref": "#/components/schemas/Vec3"
+          },
+          "velocity": {
+            "$ref": "#/components/schemas/Vec3"
+          },
+          "confidence": {
+            "type": "number"
+          },
+          "kind": {
+            "type": "string"
+          }
+        }
+      },
+      "Track": {
+        "type": "object",
+        "required": ["id", "track_no", "kind", "threat_level", "position", "velocity", "confidence", "updated_at", "status"],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "track_no": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "threat_level": {
+            "$ref": "#/components/schemas/ThreatLevel"
+          },
+          "position": {
+            "$ref": "#/components/schemas/Vec3"
+          },
+          "velocity": {
+            "$ref": "#/components/schemas/Vec3"
+          },
+          "confidence": {
+            "type": "number"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "Scenario": {
+        "type": "object",
+        "required": ["name", "seed", "tick_hz", "snapshot_hz", "ownship", "sensors", "zones", "initial_contacts"],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer"
+          },
+          "seed": {
+            "type": "integer"
+          },
+          "tick_hz": {
+            "type": "integer"
+          },
+          "snapshot_hz": {
+            "type": "integer"
+          },
+          "ownship": {
+            "$ref": "#/components/schemas/Vec3"
+          },
+          "sensors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Sensor"
+            }
+          },
+          "zones": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Zone"
+            }
+          },
+          "initial_contacts": {
+            "type": "integer"
+          },
+          "tracks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Track"
+            }
+          },
+          "contacts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Contact"
+            }
+          },
+          "allowed_actions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TrainingAction"
+            }
+          }
+        }
+      },
+      "ScenarioSummary": {
+        "type": "object",
+        "required": ["id", "name", "source"],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer"
+          },
+          "source": {
+            "type": "string"
+          }
+        }
+      },
+      "Run": {
+        "type": "object",
+        "required": ["id", "name", "status", "scenario", "created_at", "updated_at", "safety_notice"],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RunStatus"
+          },
+          "scenario": {
+            "$ref": "#/components/schemas/Scenario"
+          },
+          "owner_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "stopped_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "restored_from_store": {
+            "type": "boolean"
+          },
+          "safety_notice": {
+            "type": "string"
+          }
+        }
+      },
+      "CreateRunRequest": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "scenario_id": {
+            "type": "string"
+          },
+          "scenario": {
+            "$ref": "#/components/schemas/Scenario"
+          }
+        }
+      },
+      "Action": {
+        "type": "object",
+        "required": ["type"],
+        "properties": {
+          "type": {
+            "$ref": "#/components/schemas/TrainingAction"
+          },
+          "actor_id": {
+            "type": "string"
+          },
+          "payload": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      },
+      "SimEvent": {
+        "type": "object",
+        "required": ["id", "run_id", "occurred_at", "type", "payload"],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "type": {
+            "type": "string"
+          },
+          "subject_id": {
+            "type": "string"
+          },
+          "payload": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      },
+      "EventPage": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SimEvent"
+            }
+          },
+          "next_cursor": {
+            "type": "string"
+          }
+        }
+      },
+      "Snapshot": {
+        "type": "object",
+        "required": ["run_id", "status", "tick", "time", "tracks", "contacts", "events", "notice", "snapshot_hz"],
+        "properties": {
+          "run_id": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RunStatus"
+          },
+          "tick": {
+            "type": "integer"
+          },
+          "time": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "tracks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Track"
+            }
+          },
+          "contacts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Contact"
+            }
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SimEvent"
+            }
+          },
+          "notice": {
+            "type": "string"
+          },
+          "snapshot_hz": {
+            "type": "integer"
+          }
+        }
+      },
+      "SnapshotFrame": {
+        "type": "object",
+        "required": ["run_id", "status", "tick", "sampled_at", "tracks", "contacts", "notice", "snapshot_hz"],
+        "properties": {
+          "run_id": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RunStatus"
+          },
+          "tick": {
+            "type": "integer"
+          },
+          "sampled_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "tracks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Track"
+            }
+          },
+          "contacts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Contact"
+            }
+          },
+          "notice": {
+            "type": "string"
+          },
+          "snapshot_hz": {
+            "type": "integer"
+          }
+        }
+      },
+      "TrackPoint": {
+        "type": "object",
+        "required": ["track_id", "sampled_at", "position", "speed", "heading", "confidence"],
+        "properties": {
+          "track_id": {
+            "type": "string"
+          },
+          "sampled_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "position": {
+            "$ref": "#/components/schemas/Vec3"
+          },
+          "speed": {
+            "type": "number"
+          },
+          "heading": {
+            "type": "number"
+          },
+          "confidence": {
+            "type": "number"
+          }
+        }
+      },
+      "SnapshotRange": {
+        "type": "object",
+        "required": ["from", "to", "count"],
+        "properties": {
+          "from": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "to": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "count": {
+            "type": "integer"
+          }
+        }
+      },
+      "SnapshotCoverage": {
+        "type": "object",
+        "required": ["from", "to", "count", "average_interval_ms"],
+        "properties": {
+          "from": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "to": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "count": {
+            "type": "integer"
+          },
+          "average_interval_ms": {
+            "type": "number"
+          }
+        }
+      },
+      "ActionStat": {
+        "type": "object",
+        "required": ["type", "count"],
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "count": {
+            "type": "integer"
+          }
+        }
+      },
+      "ActorStat": {
+        "type": "object",
+        "required": ["actor_id", "count"],
+        "properties": {
+          "actor_id": {
+            "type": "string"
+          },
+          "count": {
+            "type": "integer"
+          }
+        }
+      },
+      "EventAuditSummary": {
+        "type": "object",
+        "required": ["event_count", "action_stats", "actor_stats"],
+        "properties": {
+          "event_count": {
+            "type": "integer"
+          },
+          "action_stats": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActionStat"
+            }
+          },
+          "actor_stats": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActorStat"
+            }
+          },
+          "first_action_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_action_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ThreatSummary": {
+        "type": "object",
+        "required": ["initial", "final", "high_watermark"],
+        "properties": {
+          "initial": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            }
+          },
+          "final": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            }
+          },
+          "high_watermark": {
+            "type": "integer"
+          }
+        }
+      },
+      "TrackStatusSummary": {
+        "type": "object",
+        "required": ["track_id", "track_no", "kind", "threat_level", "status", "confidence", "updated_at"],
+        "properties": {
+          "track_id": {
+            "type": "string"
+          },
+          "track_no": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "threat_level": {
+            "$ref": "#/components/schemas/ThreatLevel"
+          },
+          "status": {
+            "type": "string"
+          },
+          "confidence": {
+            "type": "number"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "RunReport": {
+        "type": "object",
+        "required": ["version", "run", "replay_mode", "duration_seconds", "track_count", "action_stats", "event_audit", "threat_summary", "final_tracks", "events", "safety_notice"],
+        "properties": {
+          "version": {
+            "type": "integer"
+          },
+          "run": {
+            "$ref": "#/components/schemas/Run"
+          },
+          "replay_mode": {
+            "type": "string"
+          },
+          "duration_seconds": {
+            "type": "integer"
+          },
+          "track_count": {
+            "type": "integer"
+          },
+          "action_stats": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActionStat"
+            }
+          },
+          "event_audit": {
+            "$ref": "#/components/schemas/EventAuditSummary"
+          },
+          "threat_summary": {
+            "$ref": "#/components/schemas/ThreatSummary"
+          },
+          "final_tracks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TrackStatusSummary"
+            }
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SimEvent"
+            }
+          },
+          "snapshot_range": {
+            "$ref": "#/components/schemas/SnapshotRange"
+          },
+          "snapshot_coverage": {
+            "$ref": "#/components/schemas/SnapshotCoverage"
+          },
+          "safety_notice": {
+            "type": "string"
+          }
+        }
+      },
+      "WebSocketTicket": {
+        "type": "object",
+        "required": ["ticket", "expires_at"],
+        "properties": {
+          "ticket": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "WebSocketSnapshotMessage": {
+        "type": "object",
+        "required": ["type", "payload"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["snapshot"]
+          },
+          "payload": {
+            "$ref": "#/components/schemas/Snapshot"
+          }
+        }
+      },
+      "RetentionPolicyInput": {
+        "type": "object",
+        "properties": {
+          "days": {
+            "type": "integer"
+          },
+          "cutoff": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "ended_before": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "max_track_points_per_run": {
+            "type": "integer"
+          },
+          "max_events_per_run": {
+            "type": "integer"
+          },
+          "max_snapshots_per_run": {
+            "type": "integer"
+          }
+        }
+      },
+      "RetentionPreview": {
+        "type": "object",
+        "required": ["runs_matched", "events_matched", "track_points_matched", "contacts_matched", "snapshots_matched"],
+        "properties": {
+          "runs_matched": {
+            "type": "integer"
+          },
+          "events_matched": {
+            "type": "integer"
+          },
+          "track_points_matched": {
+            "type": "integer"
+          },
+          "contacts_matched": {
+            "type": "integer"
+          },
+          "snapshots_matched": {
+            "type": "integer"
+          }
+        }
+      },
+      "RetentionResult": {
+        "type": "object",
+        "required": ["runs_matched", "events_deleted", "track_points_deleted", "contacts_deleted", "snapshots_deleted"],
+        "properties": {
+          "runs_matched": {
+            "type": "integer"
+          },
+          "events_deleted": {
+            "type": "integer"
+          },
+          "track_points_deleted": {
+            "type": "integer"
+          },
+          "contacts_deleted": {
+            "type": "integer"
+          },
+          "snapshots_deleted": {
+            "type": "integer"
+          }
+        }
+      },
+      "HealthResponse": {
+        "type": "object",
+        "required": ["ok", "notice"],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "notice": {
+            "type": "string"
+          }
+        }
+      },
+      "ReadyResponse": {
+        "type": "object",
+        "required": ["ok", "store", "migration_version"],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "store": {
+            "type": "string"
+          },
+          "migration_version": {
+            "type": "integer"
+          }
+        }
+      },
+      "StoreStatus": {
+        "type": "object",
+        "required": ["store", "migration_version"],
+        "properties": {
+          "store": {
+            "type": "string"
+          },
+          "migration_version": {
+            "type": "integer"
+          }
+        }
+      },
+      "MetricsResponse": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "ApiError": {
+        "type": "object",
+        "required": ["error"],
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ApiErrorBody"
+          }
+        }
+      },
+      "ApiErrorBody": {
+        "type": "object",
+        "required": ["code", "message"],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "details": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  }
+}

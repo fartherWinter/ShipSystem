@@ -91,6 +91,10 @@ Use `/healthz` for liveness and `/readyz` for readiness. `/readyz` checks store 
 
 In authenticated deployments, `/readyz`, `/metrics`, and `/metrics/prometheus` require authentication. Route probes and scrapers through the same trusted proxy or provide a secret-backed token for token-mode deployments. See `docs/observability.md`.
 
+## API Contract
+
+Publish the matching `docs/openapi.json` with each release. The contract version, `RunReport.version`, scenario versions, and image tag should be traceable together in release notes. See `docs/api.md` for compatibility rules and error-code policy.
+
 ## Compose Checks
 
 Validate the Compose model before deployment:

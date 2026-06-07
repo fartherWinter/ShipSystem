@@ -16,6 +16,7 @@ Safety boundary:
 - Simulation engine in `internal/sim`
 - REST/WebSocket API in `internal/api`
 - PostgreSQL/PostGIS migrations in `migrations/001_init.sql` and `migrations/002_snapshot_frames.sql`
+- OpenAPI contract in `docs/openapi.json`
 - React/MapLibre frontend skeleton in `web`
 - Docker/Compose packaging for small cloud deployments
 
@@ -202,6 +203,18 @@ count, snapshot write failures, HTTP request counters/latency, engine counts,
 DB readiness, and snapshot write last/average/max duration in milliseconds.
 Prometheus format is available at `/metrics/prometheus`. See
 `docs/observability.md` for probe authentication and log field guidance.
+
+API contract:
+
+```powershell
+cd web
+npm run generate:types
+```
+
+The OpenAPI source is `docs/openapi.json`. Frontend API types are generated into
+`web/src/generated/api-types.ts` and re-exported through `web/src/types.ts`.
+See `docs/api.md` for report, scenario, run, snapshot versioning and API error
+code policy.
 
 ## Operations
 

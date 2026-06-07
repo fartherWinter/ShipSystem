@@ -1,4 +1,5 @@
 import type {
+  CreateRunRequest,
   EventPage,
   Run,
   RunReport,
@@ -99,13 +100,9 @@ export function listRuns(limit = 20): Promise<Run[]> {
   return apiFetch<Run[]>(`/api/runs?limit=${limit}`);
 }
 
-export type CreateRunInput = {
-  name?: string;
-  scenario_id?: string;
-  scenario?: Scenario;
-};
+export type CreateRunInput = CreateRunRequest;
 
-export function createRun(input: CreateRunInput = {}): Promise<Run> {
+export function createRun(input: CreateRunRequest = {}): Promise<Run> {
   return apiFetch<Run>("/api/runs", jsonInit("POST", input));
 }
 
