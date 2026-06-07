@@ -1,6 +1,6 @@
-# Ship Simulation Training System
+# ShipSystem
 
-This repository contains a training/demo simulation system for ship situational awareness. It is intentionally bounded to simulated or recorded data.
+ShipSystem (船舶管理) is a training/demo simulation system for ship situational awareness. It is intentionally bounded to simulated or recorded data.
 
 Safety boundary:
 
