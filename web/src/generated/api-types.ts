@@ -73,6 +73,14 @@ export type ScenarioSummary = {
   "description"?: string;
   "version"?: number;
   "source": string;
+  "enabled": boolean;
+  "created_by"?: string;
+  "created_at"?: string;
+  "updated_at"?: string;
+};
+
+export type CopyScenarioRequest = {
+  "name"?: string;
 };
 
 export type Run = {
@@ -81,12 +89,23 @@ export type Run = {
   "status": RunStatus;
   "scenario": Scenario;
   "owner_id"?: string;
+  "tags"?: string[];
+  "trainees"?: string[];
+  "instructor_notes"?: string;
   "created_at": string;
   "updated_at": string;
   "started_at"?: string;
   "stopped_at"?: string;
+  "archived_at"?: string;
   "restored_from_store"?: boolean;
   "safety_notice": string;
+};
+
+export type RunMetadata = {
+  "tags": string[];
+  "trainees": string[];
+  "instructor_notes": string;
+  "archived": boolean;
 };
 
 export type CreateRunRequest = {
@@ -117,6 +136,35 @@ export type SimEvent = {
 export type EventPage = {
   "items": SimEvent[];
   "next_cursor"?: string;
+};
+
+export type EventAnnotationInput = {
+  "event_id"?: string;
+  "note": string;
+  "actor_id"?: string;
+};
+
+export type EventAnnotation = {
+  "id": string;
+  "run_id": string;
+  "event_id"?: string;
+  "note": string;
+  "actor_id"?: string;
+  "created_at": string;
+};
+
+export type AuditLog = {
+  "id": string;
+  "run_id"?: string;
+  "scenario_id"?: string;
+  "actor_id"?: string;
+  "action": string;
+  "target_type": string;
+  "target_id": string;
+  "occurred_at": string;
+  "payload"?: {
+  [key: string]: unknown;
+};
 };
 
 export type Snapshot = {
@@ -202,6 +250,19 @@ export type TrackStatusSummary = {
   "updated_at": string;
 };
 
+export type AssessmentCriterion = {
+  "name": string;
+  "value": number;
+  "note": string;
+};
+
+export type TrainingAssessment = {
+  "score": number;
+  "label": string;
+  "criteria": AssessmentCriterion[];
+  "safety_notice": string;
+};
+
 export type RunReport = {
   "version": number;
   "run": Run;
@@ -213,6 +274,9 @@ export type RunReport = {
   "threat_summary": ThreatSummary;
   "final_tracks": TrackStatusSummary[];
   "events": SimEvent[];
+  "annotations": EventAnnotation[];
+  "assessment": TrainingAssessment;
+  "audit_logs": AuditLog[];
   "snapshot_range"?: SnapshotRange;
   "snapshot_coverage"?: SnapshotCoverage;
   "safety_notice": string;

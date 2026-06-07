@@ -38,7 +38,8 @@ button:disabled {
 }
 
 input,
-select {
+select,
+textarea {
   width: 100%;
   min-height: 38px;
   border: 1px solid #c5d0dc;
@@ -51,9 +52,16 @@ select {
 
 input:focus,
 select:focus,
+textarea:focus,
 button:focus-visible {
   outline: 2px solid #8ab4e0;
   outline-offset: 2px;
+}
+
+textarea {
+  min-height: 76px;
+  padding: 9px 10px;
+  resize: vertical;
 }
 
 .app {
@@ -189,6 +197,7 @@ button:focus-visible {
 .events h2,
 .selectorPanel h2,
 .authPanel h2,
+.metadataPanel h2,
 .replayPanel h2,
 .reportPanel h2 {
   font-size: 15px;
@@ -197,10 +206,70 @@ button:focus-visible {
 
 .authPanel,
 .selectorPanel,
+.metadataPanel,
 .replayPanel,
 .reportPanel {
   display: grid;
   gap: 8px;
+}
+
+.scenarioMeta {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  color: #65758a;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.scenarioMeta span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scenarioMeta b {
+  border-radius: 999px;
+  background: #edf8f1;
+  color: #24613b;
+  padding: 3px 8px;
+}
+
+.scenarioMeta b[data-enabled="false"] {
+  background: #fff1ef;
+  color: #a13225;
+}
+
+.scenarioActions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 6px;
+}
+
+.scenarioActions button {
+  min-width: 0;
+  min-height: 34px;
+  padding: 0 9px;
+}
+
+.metadataPanel textarea,
+.annotationPanel textarea {
+  font-size: 13px;
+}
+
+.checkRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #526274;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.checkRow input {
+  width: auto;
+  min-height: auto;
 }
 
 .sectionHeader {
@@ -418,6 +487,53 @@ button:focus-visible {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 6px;
+}
+
+.assessmentSummary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #d9e1e9;
+  background: #ffffff;
+  border-radius: 6px;
+  padding: 8px;
+  font-size: 13px;
+}
+
+.assessmentSummary span {
+  overflow-wrap: anywhere;
+}
+
+.assessmentSummary b {
+  border-radius: 999px;
+  background: #e7f0fb;
+  color: #245a94;
+  padding: 4px 9px;
+}
+
+.annotationPanel {
+  display: grid;
+  gap: 6px;
+}
+
+.annotationPanel button {
+  min-height: 34px;
+}
+
+.annotationList {
+  display: grid;
+  gap: 5px;
+}
+
+.annotationList span {
+  border: 1px solid #d9e1e9;
+  background: #ffffff;
+  border-radius: 6px;
+  padding: 7px 8px;
+  color: #526274;
+  font-size: 12px;
+  overflow-wrap: anywhere;
 }
 
 .auditSummary span {

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Activity,
   ChevronLeft,
@@ -8,6 +8,7 @@ import {
   Download,
   FileJson,
   Filter,
+  FileText,
   LogIn,
   LogOut,
   Pause,
@@ -21,18 +22,19 @@ import {
   Square,
   StepBack,
   StepForward,
+  Tags,
   Waves,
   Zap
 } from "lucide-react";
 import type { FrontendAuthMode } from "./config";
-import type { ConnectionState, Run, RunReport, ScenarioSummary, SimEvent, Snapshot, SnapshotFrame, Track, TrainingAction } from "./types";
+import type { ConnectionState, Run, RunMetadata, RunReport, ScenarioSummary, SimEvent, Snapshot, SnapshotFrame, Track, TrainingAction } from "./types";
 import { trainingActions } from "./types";
 
 type ThreatFilter = "all" | "high" | "medium" | "low";
 type SeverityFilter = "all" | "info" | "warning" | "error";
 
 export type ReplaySpeed = 0.5 | 1 | 2 | 4;
-export type ReportExportFormat = "json" | "csv";
+export type ReportExportFormat = "json" | "csv" | "html" | "pdf";
 
 type ControlSidebarProps = {
   runs: Run[];
@@ -64,6 +66,10 @@ type ControlSidebarProps = {
   onSelectRun: (run: Run) => void;
   onSelectScenario: (scenarioID: string) => void;
   onScenarioFile: (file: File) => void;
+  onCopyScenario: (name: string) => void;
+  onSetScenarioEnabled: (enabled: boolean) => void;
+  onSaveRunMetadata: (metadata: RunMetadata) => void;
+  onAddAnnotation: (eventID: string, note: string) => void;
   onThreatFilter: (filter: ThreatFilter) => void;
   onReplayIndex: (index: number) => void;
   onReplayStep: (delta: number) => void;
@@ -110,6 +116,10 @@ export function ControlSidebar({
   onSelectRun,
   onSelectScenario,
   onScenarioFile,
+  onCopyScenario,
+  onSetScenarioEnabled,
+  onSaveRunMetadata,
+  onAddAnnotation,
   onThreatFilter,
   onReplayIndex,
   onReplayStep,
@@ -129,6 +139,13 @@ export function ControlSidebar({
   const [severityFilter, setSeverityFilter] = useState<SeverityFilter>("all");
   const [fromFilter, setFromFilter] = useState("");
   const [toFilter, setToFilter] = useState("");
+  const [scenarioCopyName, setScenarioCopyName] = useState("");
+  const [tagInput, setTagInput] = useState("");
+  const [traineeInput, setTraineeInput] = useState("");
+  const [instructorNotes, setInstructorNotes] = useState("");
+  const [archived, setArchived] = useState(false);
+  const [annotationEventID, setAnnotationEventID] = useState("");
+  const [annotationNote, setAnnotationNote] = useState("");
   const highThreats = tracks.filter((track) => track.threat_level === "high").length;
   const statusText = snapshot?.status ?? run?.status ?? "idle";
   const started = run?.started_at ? new Date(run.started_at).getTime() : 0;
@@ -155,6 +172,21 @@ export function ControlSidebar({
   const replayProgress = replayRange ? timelineProgress(replayRange.from, replayRange.to, activeReplayFrame?.sampled_at) : 0;
   const canPagePrevious = canPageWindow(replayRange?.from, replayWindowStart, "previous") && !replayDisabled && !legacyReplay;
   const canPageNext = canPageWindow(replayRange?.to, replayWindowEnd, "next") && !replayDisabled && !legacyReplay;
+  const selectedScenario = scenarios.find((scenario) => scenario.id === selectedScenarioID);
+  const scenarioDisabled = selectedScenario?.enabled === false;
+
+  useEffect(() => {
+    setTagInput((run?.tags ?? []).join(", "));
+    setTraineeInput((run?.trainees ?? []).join(", "));
+    setInstructorNotes(run?.instructor_notes ?? "");
+    setArchived(Boolean(run?.archived_at));
+  }, [run?.id, run?.tags, run?.trainees, run?.instructor_notes, run?.archived_at]);
+
+  useEffect(() => {
+    if (!annotationEventID && reportEvents[0]?.id) {
+      setAnnotationEventID(reportEvents[0].id);
+    }
+  }, [annotationEventID, reportEvents]);
 
   return (
     <aside className="sidebar">
@@ -224,10 +256,14 @@ export function ControlSidebar({
         <select value={selectedScenarioID} onChange={(event) => onSelectScenario(event.target.value)} disabled={busy || scenarios.length === 0}>
           {scenarios.map((scenario) => (
             <option key={scenario.id} value={scenario.id}>
-              {scenario.name} v{scenario.version ?? 1}
+              {scenario.name} v{scenario.version ?? 1}{scenario.enabled === false ? " (disabled)" : ""}
             </option>
           ))}
         </select>
+        <div className="scenarioMeta">
+          <span>{selectedScenario?.source ?? "unknown"}</span>
+          <b data-enabled={selectedScenario?.enabled !== false}>{selectedScenario?.enabled === false ? "Disabled" : "Enabled"}</b>
+        </div>
         <input
           type="file"
           accept="application/json,.json"
@@ -238,6 +274,23 @@ export function ControlSidebar({
             event.currentTarget.value = "";
           }}
         />
+        <div className="scenarioActions">
+          <input
+            value={scenarioCopyName}
+            onChange={(event) => setScenarioCopyName(event.target.value)}
+            placeholder="Copy name"
+            disabled={busy || !selectedScenario}
+          />
+          <button onClick={() => onCopyScenario(scenarioCopyName)} disabled={busy || !selectedScenario}>
+            <FileText size={16} /> Copy
+          </button>
+          <button
+            onClick={() => onSetScenarioEnabled(selectedScenario?.enabled === false)}
+            disabled={busy || !selectedScenario || selectedScenario.source !== "database"}
+          >
+            {selectedScenario?.enabled === false ? "Enable" : "Disable"}
+          </button>
+        </div>
       </section>
 
       <section className="filterPanel" aria-label="Threat filter">
@@ -340,7 +393,7 @@ export function ControlSidebar({
       </section>
 
       <section className="toolbar">
-        <button onClick={onCreateRun} disabled={busy || authRequired}>
+        <button onClick={onCreateRun} disabled={busy || authRequired || scenarioDisabled}>
           <Radio size={16} /> New Run
         </button>
         <button onClick={() => onCommand("start")} disabled={!run || busy || authRequired || run.status === "stopped"}>
@@ -365,6 +418,32 @@ export function ControlSidebar({
 
       {error ? <p className="errorLine">{error}</p> : null}
 
+      <section className="metadataPanel">
+        <div className="sectionHeader">
+          <h2>Training Record</h2>
+          <button
+            onClick={() =>
+              onSaveRunMetadata({
+                tags: splitList(tagInput),
+                trainees: splitList(traineeInput),
+                instructor_notes: instructorNotes,
+                archived
+              })
+            }
+            disabled={!run || busy || authRequired}
+          >
+            <Tags size={16} /> Save
+          </button>
+        </div>
+        <input value={tagInput} onChange={(event) => setTagInput(event.target.value)} placeholder="Tags" disabled={!run || busy} />
+        <input value={traineeInput} onChange={(event) => setTraineeInput(event.target.value)} placeholder="Trainees" disabled={!run || busy} />
+        <textarea value={instructorNotes} onChange={(event) => setInstructorNotes(event.target.value)} placeholder="Instructor notes" disabled={!run || busy} />
+        <label className="checkRow">
+          <input type="checkbox" checked={archived} onChange={(event) => setArchived(event.target.checked)} disabled={!run || busy} />
+          <span>Archived</span>
+        </label>
+      </section>
+
       <section className="notice">
         <Shield size={18} />
         <p>No real weapon, fire-control, radar, or electronic-warfare interface is implemented.</p>
@@ -379,6 +458,12 @@ export function ControlSidebar({
             </button>
             <button onClick={() => onExportReport("csv")} disabled={!run || !report || busy} aria-label="Export report CSV">
               <Download size={16} /> CSV
+            </button>
+            <button onClick={() => onExportReport("html")} disabled={!run || !report || busy} aria-label="Export report HTML">
+              <FileText size={16} /> HTML
+            </button>
+            <button onClick={() => onExportReport("pdf")} disabled={!run || !report || busy} aria-label="Export report PDF">
+              <Download size={16} /> PDF
             </button>
           </div>
         </div>
@@ -436,12 +521,44 @@ export function ControlSidebar({
                 ))
               )}
             </div>
+            <div className="assessmentSummary">
+              <span>Assessment {report.assessment.label}</span>
+              <b>{report.assessment.score}</b>
+            </div>
             <div className="auditSummary">
               <span>Events {report.event_audit.event_count}</span>
               <span>Actors {report.event_audit.actor_stats.length}</span>
               <span>First {formatTime(report.event_audit.first_action_at)}</span>
               <span>Last {formatTime(report.event_audit.last_action_at)}</span>
             </div>
+            <div className="annotationPanel">
+              <select value={annotationEventID} onChange={(event) => setAnnotationEventID(event.target.value)} disabled={busy || reportEvents.length === 0}>
+                {reportEvents.slice(0, 20).map((event) => (
+                  <option key={event.id} value={event.id}>
+                    {formatShortTime(event.occurred_at)} {eventAction(event)}
+                  </option>
+                ))}
+              </select>
+              <textarea value={annotationNote} onChange={(event) => setAnnotationNote(event.target.value)} placeholder="Event annotation" disabled={busy || !run} />
+              <button
+                onClick={() => {
+                  onAddAnnotation(annotationEventID, annotationNote);
+                  setAnnotationNote("");
+                }}
+                disabled={!run || busy || annotationNote.trim() === ""}
+              >
+                Add Annotation
+              </button>
+            </div>
+            {report.annotations.length > 0 ? (
+              <div className="annotationList">
+                {report.annotations.slice(0, 4).map((annotation) => (
+                  <span key={annotation.id}>
+                    {formatShortTime(annotation.created_at)} {annotation.note}
+                  </span>
+                ))}
+              </div>
+            ) : null}
             <div className="auditList">
               {filteredEvents.length === 0 ? (
                 <p className="emptyLine">No events match the filters</p>
@@ -561,6 +678,13 @@ function canPageWindow(boundary?: string, edge?: string, direction?: "previous" 
   const edgeMS = new Date(edge).getTime();
   if (!Number.isFinite(boundaryMS) || !Number.isFinite(edgeMS)) return false;
   return direction === "previous" ? edgeMS > boundaryMS : edgeMS < boundaryMS;
+}
+
+function splitList(value: string) {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 function Metric({ label, value }: { label: string; value: string }) {

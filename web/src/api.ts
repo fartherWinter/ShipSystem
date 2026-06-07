@@ -1,7 +1,11 @@
 import type {
+  AuditLog,
   CreateRunRequest,
+  EventAnnotation,
+  EventAnnotationInput,
   EventPage,
   Run,
+  RunMetadata,
   RunReport,
   Scenario,
   ScenarioSummary,
@@ -101,6 +105,7 @@ export function listRuns(limit = 20): Promise<Run[]> {
 }
 
 export type CreateRunInput = CreateRunRequest;
+export type ReportExportFormat = "json" | "csv" | "html" | "pdf";
 
 export function createRun(input: CreateRunRequest = {}): Promise<Run> {
   return apiFetch<Run>("/api/runs", jsonInit("POST", input));
@@ -128,6 +133,38 @@ export function listScenarios(): Promise<ScenarioSummary[]> {
 
 export function getScenario(id: string): Promise<Scenario> {
   return apiFetch<Scenario>(`/api/scenarios/${encodeURIComponent(id)}`);
+}
+
+export function createScenario(scenario: Scenario): Promise<ScenarioSummary> {
+  return apiFetch<ScenarioSummary>("/api/scenarios", jsonInit("POST", scenario));
+}
+
+export function updateScenario(id: string, scenario: Scenario): Promise<ScenarioSummary> {
+  return apiFetch<ScenarioSummary>(`/api/scenarios/${encodeURIComponent(id)}`, jsonInit("PUT", scenario));
+}
+
+export function copyScenario(id: string, name?: string): Promise<ScenarioSummary> {
+  return apiFetch<ScenarioSummary>(`/api/scenarios/${encodeURIComponent(id)}/copy`, jsonInit("POST", { name: name ?? "" }));
+}
+
+export function setScenarioEnabled(id: string, enabled: boolean): Promise<ScenarioSummary> {
+  return apiFetch<ScenarioSummary>(`/api/scenarios/${encodeURIComponent(id)}/${enabled ? "enable" : "disable"}`, { method: "POST" });
+}
+
+export function updateRunMetadata(runID: string, metadata: RunMetadata): Promise<Run> {
+  return apiFetch<Run>(`/api/runs/${runID}/metadata`, jsonInit("PUT", metadata));
+}
+
+export function listAnnotations(runID: string): Promise<EventAnnotation[]> {
+  return apiFetch<EventAnnotation[]>(`/api/runs/${runID}/annotations`);
+}
+
+export function addAnnotation(runID: string, annotation: EventAnnotationInput): Promise<EventAnnotation> {
+  return apiFetch<EventAnnotation>(`/api/runs/${runID}/annotations`, jsonInit("POST", annotation));
+}
+
+export function listAuditLogs(runID: string, limit = 50): Promise<AuditLog[]> {
+  return apiFetch<AuditLog[]>(`/api/runs/${runID}/audit?limit=${limit}`);
 }
 
 export function listEvents(runID: string, limit = 20, cursor = ""): Promise<EventPage> {
@@ -175,16 +212,16 @@ export function createWebSocketTicket(runID: string): Promise<WebSocketTicket> {
   return apiFetch<WebSocketTicket>(`/api/runs/${runID}/ws-ticket`, { method: "POST" });
 }
 
-export function reportDownloadPath(runID: string, format: "csv" | "json"): string {
+export function reportDownloadPath(runID: string, format: ReportExportFormat): string {
   const query = new URLSearchParams();
-  if (format === "csv") {
-    query.set("format", "csv");
+  if (format !== "json") {
+    query.set("format", format);
   }
   const suffix = query.toString();
   return `/api/runs/${runID}/report${suffix ? `?${suffix}` : ""}`;
 }
 
-export async function downloadRunReport(runID: string, format: "csv" | "json"): Promise<Blob> {
+export async function downloadRunReport(runID: string, format: ReportExportFormat): Promise<Blob> {
   const headers = new Headers();
   if (apiToken) {
     headers.set("Authorization", `Bearer ${apiToken}`);
@@ -204,7 +241,7 @@ export async function downloadRunReport(runID: string, format: "csv" | "json"): 
   return res.blob();
 }
 
-export function reportFilename(runID: string, format: "csv" | "json"): string {
+export function reportFilename(runID: string, format: ReportExportFormat): string {
   return `run-${runID}-report.${format}`;
 }
 

@@ -19,7 +19,7 @@ type Postgres struct {
 	pool *pgxpool.Pool
 }
 
-const CurrentMigrationVersion = 2
+const CurrentMigrationVersion = 3
 
 type MigrationStatus struct {
 	Current  int
@@ -34,7 +34,7 @@ func (m MigrationStatus) Error() error {
 	if m.Ready() {
 		return nil
 	}
-	return fmt.Errorf("database migrations are not current: current version %d, required version %d; apply migrations/001_init.sql through migrations/002_snapshot_frames.sql before starting PostgreSQL mode", m.Current, m.Required)
+	return fmt.Errorf("database migrations are not current: current version %d, required version %d; apply migrations/001_init.sql through migrations/003_training_product.sql before starting PostgreSQL mode", m.Current, m.Required)
 }
 
 func NewPostgres(ctx context.Context, dsn string) (*Postgres, error) {
@@ -118,18 +118,32 @@ func (p *Postgres) SaveRun(ctx context.Context, run model.Run) error {
 	if err != nil {
 		return err
 	}
+	tags, err := json.Marshal(run.Tags)
+	if err != nil {
+		return err
+	}
+	trainees, err := json.Marshal(run.Trainees)
+	if err != nil {
+		return err
+	}
 	_, err = p.pool.Exec(ctx, `
-INSERT INTO sim_runs (id, name, status, owner_id, scenario_name, scenario, created_at, updated_at, started_at, stopped_at, safety_notice)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+INSERT INTO sim_runs (id, name, status, owner_id, scenario_name, scenario, created_at, updated_at, started_at, stopped_at, safety_notice, tags, trainees, instructor_notes, archived_at)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
 ON CONFLICT (id) DO UPDATE SET
+	name = EXCLUDED.name,
 	status = EXCLUDED.status,
 	owner_id = EXCLUDED.owner_id,
 	updated_at = EXCLUDED.updated_at,
 	started_at = EXCLUDED.started_at,
 	stopped_at = EXCLUDED.stopped_at,
-	scenario = EXCLUDED.scenario`,
+	scenario = EXCLUDED.scenario,
+	tags = EXCLUDED.tags,
+	trainees = EXCLUDED.trainees,
+	instructor_notes = EXCLUDED.instructor_notes,
+	archived_at = EXCLUDED.archived_at,
+	safety_notice = EXCLUDED.safety_notice`,
 		run.ID, run.Name, run.Status, nullableString(run.OwnerID), run.Scenario.Name, scenario, run.CreatedAt, run.UpdatedAt,
-		nullableTime(run.StartedAt), nullableTime(run.StoppedAt), run.SafetyNotice)
+		nullableTime(run.StartedAt), nullableTime(run.StoppedAt), run.SafetyNotice, tags, trainees, run.InstructorNotes, nullableTime(run.ArchivedAt))
 	if err != nil {
 		return fmt.Errorf("save run: %w", err)
 	}
@@ -160,56 +174,28 @@ ON CONFLICT (run_id, id) DO NOTHING`, zone.ID, run.ID, zone.Name, zone.Kind, geo
 }
 
 func (p *Postgres) GetRun(ctx context.Context, id string) (model.Run, error) {
-	var run model.Run
-	var scenarioBytes []byte
-	var startedAt *time.Time
-	var stoppedAt *time.Time
-	err := p.pool.QueryRow(ctx, `
-SELECT id, name, status, COALESCE(owner_id,''), scenario, created_at, updated_at, started_at, stopped_at, safety_notice
-FROM sim_runs WHERE id = $1`, id).Scan(
-		&run.ID, &run.Name, &run.Status, &run.OwnerID, &scenarioBytes, &run.CreatedAt, &run.UpdatedAt, &startedAt, &stoppedAt, &run.SafetyNotice)
+	run, err := scanRun(p.pool.QueryRow(ctx, `
+SELECT id, name, status, COALESCE(owner_id,''), scenario, created_at, updated_at, started_at, stopped_at, archived_at, safety_notice, tags, trainees, instructor_notes
+FROM sim_runs WHERE id = $1`, id).Scan)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return model.Run{}, errors.New("run not found")
 	}
 	if err != nil {
 		return model.Run{}, err
-	}
-	if err := json.Unmarshal(scenarioBytes, &run.Scenario); err != nil {
-		return model.Run{}, err
-	}
-	if startedAt != nil {
-		run.StartedAt = *startedAt
-	}
-	if stoppedAt != nil {
-		run.StoppedAt = *stoppedAt
 	}
 	return run, nil
 }
 
 func (p *Postgres) GetRunForOwner(ctx context.Context, id, ownerID string) (model.Run, error) {
-	var run model.Run
-	var scenarioBytes []byte
-	var startedAt *time.Time
-	var stoppedAt *time.Time
-	err := p.pool.QueryRow(ctx, `
-SELECT id, name, status, COALESCE(owner_id,''), scenario, created_at, updated_at, started_at, stopped_at, safety_notice
+	run, err := scanRun(p.pool.QueryRow(ctx, `
+SELECT id, name, status, COALESCE(owner_id,''), scenario, created_at, updated_at, started_at, stopped_at, archived_at, safety_notice, tags, trainees, instructor_notes
 FROM sim_runs
-WHERE id = $1 AND ($2 = '' OR owner_id = $2)`, id, ownerID).Scan(
-		&run.ID, &run.Name, &run.Status, &run.OwnerID, &scenarioBytes, &run.CreatedAt, &run.UpdatedAt, &startedAt, &stoppedAt, &run.SafetyNotice)
+WHERE id = $1 AND ($2 = '' OR owner_id = $2)`, id, ownerID).Scan)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return model.Run{}, errors.New("run not found")
 	}
 	if err != nil {
 		return model.Run{}, err
-	}
-	if err := json.Unmarshal(scenarioBytes, &run.Scenario); err != nil {
-		return model.Run{}, err
-	}
-	if startedAt != nil {
-		run.StartedAt = *startedAt
-	}
-	if stoppedAt != nil {
-		run.StoppedAt = *stoppedAt
 	}
 	return run, nil
 }
@@ -217,7 +203,7 @@ WHERE id = $1 AND ($2 = '' OR owner_id = $2)`, id, ownerID).Scan(
 func (p *Postgres) ListRuns(ctx context.Context, limit int) ([]model.Run, error) {
 	limit = normalizeLimit(limit, 50, 100)
 	rows, err := p.pool.Query(ctx, `
-SELECT id, name, status, COALESCE(owner_id,''), scenario, created_at, updated_at, started_at, stopped_at, safety_notice
+SELECT id, name, status, COALESCE(owner_id,''), scenario, created_at, updated_at, started_at, stopped_at, archived_at, safety_notice, tags, trainees, instructor_notes
 FROM sim_runs ORDER BY created_at DESC LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
@@ -225,21 +211,9 @@ FROM sim_runs ORDER BY created_at DESC LIMIT $1`, limit)
 	defer rows.Close()
 	var runs []model.Run
 	for rows.Next() {
-		var run model.Run
-		var scenarioBytes []byte
-		var startedAt *time.Time
-		var stoppedAt *time.Time
-		if err := rows.Scan(&run.ID, &run.Name, &run.Status, &run.OwnerID, &scenarioBytes, &run.CreatedAt, &run.UpdatedAt, &startedAt, &stoppedAt, &run.SafetyNotice); err != nil {
+		run, err := scanRun(rows.Scan)
+		if err != nil {
 			return nil, err
-		}
-		if err := json.Unmarshal(scenarioBytes, &run.Scenario); err != nil {
-			return nil, err
-		}
-		if startedAt != nil {
-			run.StartedAt = *startedAt
-		}
-		if stoppedAt != nil {
-			run.StoppedAt = *stoppedAt
 		}
 		runs = append(runs, run)
 	}
@@ -249,7 +223,7 @@ FROM sim_runs ORDER BY created_at DESC LIMIT $1`, limit)
 func (p *Postgres) ListRunsForOwner(ctx context.Context, limit int, ownerID string) ([]model.Run, error) {
 	limit = normalizeLimit(limit, 50, 100)
 	rows, err := p.pool.Query(ctx, `
-SELECT id, name, status, COALESCE(owner_id,''), scenario, created_at, updated_at, started_at, stopped_at, safety_notice
+SELECT id, name, status, COALESCE(owner_id,''), scenario, created_at, updated_at, started_at, stopped_at, archived_at, safety_notice, tags, trainees, instructor_notes
 FROM sim_runs
 WHERE ($2 = '' OR owner_id = $2)
 ORDER BY created_at DESC LIMIT $1`, limit, ownerID)
@@ -259,21 +233,9 @@ ORDER BY created_at DESC LIMIT $1`, limit, ownerID)
 	defer rows.Close()
 	var runs []model.Run
 	for rows.Next() {
-		var run model.Run
-		var scenarioBytes []byte
-		var startedAt *time.Time
-		var stoppedAt *time.Time
-		if err := rows.Scan(&run.ID, &run.Name, &run.Status, &run.OwnerID, &scenarioBytes, &run.CreatedAt, &run.UpdatedAt, &startedAt, &stoppedAt, &run.SafetyNotice); err != nil {
+		run, err := scanRun(rows.Scan)
+		if err != nil {
 			return nil, err
-		}
-		if err := json.Unmarshal(scenarioBytes, &run.Scenario); err != nil {
-			return nil, err
-		}
-		if startedAt != nil {
-			run.StartedAt = *startedAt
-		}
-		if stoppedAt != nil {
-			run.StoppedAt = *stoppedAt
 		}
 		runs = append(runs, run)
 	}
@@ -536,9 +498,9 @@ SELECT id, name, kind, ST_AsGeoJSON(geom) FROM zones WHERE run_id=$1 ORDER BY na
 
 func (p *Postgres) ListScenarioSummaries(ctx context.Context) ([]model.ScenarioSummary, error) {
 	rows, err := p.pool.Query(ctx, `
-SELECT id::text, name, version, body
+SELECT id::text, name, version, description, source, enabled, COALESCE(created_by,''), created_at, updated_at
 FROM scenarios
-ORDER BY name, version DESC`)
+ORDER BY name, version DESC, created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -546,49 +508,192 @@ ORDER BY name, version DESC`)
 	var summaries []model.ScenarioSummary
 	for rows.Next() {
 		var summary model.ScenarioSummary
-		var body []byte
-		if err := rows.Scan(&summary.ID, &summary.Name, &summary.Version, &body); err != nil {
+		if err := rows.Scan(&summary.ID, &summary.Name, &summary.Version, &summary.Description, &summary.Source, &summary.Enabled, &summary.CreatedBy, &summary.CreatedAt, &summary.UpdatedAt); err != nil {
 			return nil, err
 		}
-		var scenario model.Scenario
-		_ = json.Unmarshal(body, &scenario)
-		if scenario.Description != "" {
-			summary.Description = scenario.Description
-		}
-		summary.Source = "database"
 		summaries = append(summaries, summary)
 	}
 	return summaries, rows.Err()
 }
 
 func (p *Postgres) GetScenario(ctx context.Context, id string) (model.Scenario, error) {
-	var scenario model.Scenario
-	var body []byte
-	var name string
-	var version int
-	err := p.pool.QueryRow(ctx, `
-SELECT name, version, body
-FROM scenarios
-WHERE id::text=$1`, id).Scan(&name, &version, &body)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return model.Scenario{}, errors.New("scenario not found")
-	}
+	record, err := p.GetScenarioRecord(ctx, id)
 	if err != nil {
 		return model.Scenario{}, err
 	}
-	if err := json.Unmarshal(body, &scenario); err != nil {
-		return model.Scenario{}, err
+	return record.Scenario, nil
+}
+
+func (p *Postgres) GetScenarioRecord(ctx context.Context, id string) (model.ScenarioRecord, error) {
+	var record model.ScenarioRecord
+	var body []byte
+	var name string
+	var version int
+	var description string
+	err := p.pool.QueryRow(ctx, `
+SELECT id::text, name, version, description, source, enabled, COALESCE(created_by,''), created_at, updated_at, body
+FROM scenarios
+WHERE id::text=$1`, id).Scan(
+		&record.ID, &name, &version, &description, &record.Source,
+		&record.Enabled, &record.CreatedBy, &record.CreatedAt, &record.UpdatedAt, &body)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return model.ScenarioRecord{}, errors.New("scenario not found")
 	}
-	if scenario.ID == "" {
-		scenario.ID = id
+	if err != nil {
+		return model.ScenarioRecord{}, err
 	}
-	if scenario.Name == "" {
-		scenario.Name = name
+	if err := json.Unmarshal(body, &record.Scenario); err != nil {
+		return model.ScenarioRecord{}, err
 	}
-	if scenario.Version == 0 {
-		scenario.Version = version
+	if record.Scenario.ID == "" {
+		record.Scenario.ID = record.ID
 	}
-	return scenario, nil
+	if record.Scenario.Name == "" {
+		record.Scenario.Name = name
+	}
+	if record.Scenario.Version == 0 {
+		record.Scenario.Version = version
+	}
+	if record.Scenario.Description == "" {
+		record.Scenario.Description = description
+	}
+	return record, nil
+}
+
+func (p *Postgres) SaveScenario(ctx context.Context, record model.ScenarioRecord) (model.ScenarioSummary, error) {
+	if record.Source == "" {
+		record.Source = "database"
+	}
+	if !record.Enabled && record.UpdatedAt.IsZero() {
+		record.Enabled = true
+	}
+	body, err := json.Marshal(record.Scenario)
+	if err != nil {
+		return model.ScenarioSummary{}, err
+	}
+	var summary model.ScenarioSummary
+	if record.ID == "" {
+		err = p.pool.QueryRow(ctx, `
+INSERT INTO scenarios (name, version, description, source, enabled, created_by, body)
+VALUES ($1,$2,$3,$4,$5,$6,$7)
+RETURNING id::text, name, version, description, source, enabled, COALESCE(created_by,''), created_at, updated_at`,
+			record.Scenario.Name, record.Scenario.Version, record.Scenario.Description, record.Source, record.Enabled, nullableString(record.CreatedBy), body).Scan(
+			&summary.ID, &summary.Name, &summary.Version, &summary.Description, &summary.Source, &summary.Enabled, &summary.CreatedBy, &summary.CreatedAt, &summary.UpdatedAt)
+	} else {
+		err = p.pool.QueryRow(ctx, `
+UPDATE scenarios
+SET name=$2, version=$3, description=$4, source=$5, enabled=$6, created_by=COALESCE(created_by,$7), body=$8, updated_at=now()
+WHERE id::text=$1
+RETURNING id::text, name, version, description, source, enabled, COALESCE(created_by,''), created_at, updated_at`,
+			record.ID, record.Scenario.Name, record.Scenario.Version, record.Scenario.Description, record.Source, record.Enabled, nullableString(record.CreatedBy), body).Scan(
+			&summary.ID, &summary.Name, &summary.Version, &summary.Description, &summary.Source, &summary.Enabled, &summary.CreatedBy, &summary.CreatedAt, &summary.UpdatedAt)
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return model.ScenarioSummary{}, errors.New("scenario not found")
+	}
+	if err != nil {
+		return model.ScenarioSummary{}, err
+	}
+	if summary.ID != "" && record.Scenario.ID != summary.ID {
+		updated := record.Scenario
+		updated.ID = summary.ID
+		updatedBody, marshalErr := json.Marshal(updated)
+		if marshalErr != nil {
+			return model.ScenarioSummary{}, marshalErr
+		}
+		if _, updateErr := p.pool.Exec(ctx, `UPDATE scenarios SET body=$2 WHERE id::text=$1`, summary.ID, updatedBody); updateErr != nil {
+			return model.ScenarioSummary{}, updateErr
+		}
+	}
+	return summary, nil
+}
+
+func (p *Postgres) SetScenarioEnabled(ctx context.Context, id string, enabled bool, actorID string) (model.ScenarioSummary, error) {
+	var summary model.ScenarioSummary
+	err := p.pool.QueryRow(ctx, `
+UPDATE scenarios
+SET enabled=$2, created_by=COALESCE(created_by,$3), updated_at=now()
+WHERE id::text=$1
+RETURNING id::text, name, version, description, source, enabled, COALESCE(created_by,''), created_at, updated_at`,
+		id, enabled, nullableString(actorID)).Scan(
+		&summary.ID, &summary.Name, &summary.Version, &summary.Description, &summary.Source, &summary.Enabled, &summary.CreatedBy, &summary.CreatedAt, &summary.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return model.ScenarioSummary{}, errors.New("scenario not found")
+	}
+	return summary, err
+}
+
+func (p *Postgres) SaveEventAnnotation(ctx context.Context, annotation model.EventAnnotation) (model.EventAnnotation, error) {
+	err := p.pool.QueryRow(ctx, `
+INSERT INTO event_annotations (run_id, event_id, note, actor_id)
+VALUES ($1,$2,$3,$4)
+RETURNING id::text, run_id::text, COALESCE(event_id,''), note, COALESCE(actor_id,''), created_at`,
+		annotation.RunID, nullableString(annotation.EventID), annotation.Note, nullableString(annotation.ActorID)).Scan(
+		&annotation.ID, &annotation.RunID, &annotation.EventID, &annotation.Note, &annotation.ActorID, &annotation.CreatedAt)
+	if err != nil {
+		return model.EventAnnotation{}, err
+	}
+	return annotation, nil
+}
+
+func (p *Postgres) ListEventAnnotations(ctx context.Context, runID string) ([]model.EventAnnotation, error) {
+	rows, err := p.pool.Query(ctx, `
+SELECT id::text, run_id::text, COALESCE(event_id,''), note, COALESCE(actor_id,''), created_at
+FROM event_annotations
+WHERE run_id=$1
+ORDER BY created_at, id`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var annotations []model.EventAnnotation
+	for rows.Next() {
+		var annotation model.EventAnnotation
+		if err := rows.Scan(&annotation.ID, &annotation.RunID, &annotation.EventID, &annotation.Note, &annotation.ActorID, &annotation.CreatedAt); err != nil {
+			return nil, err
+		}
+		annotations = append(annotations, annotation)
+	}
+	return annotations, rows.Err()
+}
+
+func (p *Postgres) SaveAuditLog(ctx context.Context, log model.AuditLog) error {
+	payload, err := json.Marshal(log.Payload)
+	if err != nil {
+		return err
+	}
+	_, err = p.pool.Exec(ctx, `
+INSERT INTO audit_logs (run_id, scenario_id, actor_id, action, target_type, target_id, occurred_at, payload)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+		nullableString(log.RunID), nullableString(log.ScenarioID), nullableString(log.ActorID),
+		log.Action, log.TargetType, log.TargetID, coalesceTime(log.OccurredAt), payload)
+	return err
+}
+
+func (p *Postgres) ListAuditLogs(ctx context.Context, query model.AuditLogQuery) ([]model.AuditLog, error) {
+	limit := normalizeLimit(query.Limit, 50, 200)
+	rows, err := p.pool.Query(ctx, `
+SELECT id::text, COALESCE(run_id::text,''), COALESCE(scenario_id,''), COALESCE(actor_id,''), action, target_type, target_id, occurred_at, payload
+FROM audit_logs
+WHERE ($1 = '' OR run_id::text = $1)
+	AND ($2 = '' OR scenario_id = $2)
+ORDER BY occurred_at DESC, id DESC
+LIMIT $3`, query.RunID, query.ScenarioID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var logs []model.AuditLog
+	for rows.Next() {
+		var log model.AuditLog
+		var payload []byte
+		if err := rows.Scan(&log.ID, &log.RunID, &log.ScenarioID, &log.ActorID, &log.Action, &log.TargetType, &log.TargetID, &log.OccurredAt, &payload); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal(payload, &log.Payload)
+		logs = append(logs, log)
+	}
+	return logs, rows.Err()
 }
 
 func (p *Postgres) PreviewPrune(ctx context.Context, policy model.RetentionPolicy) (model.RetentionPreview, error) {
@@ -830,6 +935,13 @@ func nullableTime(t time.Time) *time.Time {
 	return &t
 }
 
+func coalesceTime(t time.Time) time.Time {
+	if t.IsZero() {
+		return time.Now().UTC()
+	}
+	return t
+}
+
 func nullableString(value string) *string {
 	if strings.TrimSpace(value) == "" {
 		return nil
@@ -851,6 +963,42 @@ func statementTimeoutFromContext(ctx context.Context) (string, bool) {
 		ms = 1
 	}
 	return fmt.Sprintf("%dms", ms), true
+}
+
+func scanRun(scan func(dest ...any) error) (model.Run, error) {
+	var run model.Run
+	var scenarioBytes []byte
+	var tagsJSON []byte
+	var traineesJSON []byte
+	var startedAt *time.Time
+	var stoppedAt *time.Time
+	var archivedAt *time.Time
+	if err := scan(&run.ID, &run.Name, &run.Status, &run.OwnerID, &scenarioBytes, &run.CreatedAt, &run.UpdatedAt, &startedAt, &stoppedAt, &archivedAt, &run.SafetyNotice, &tagsJSON, &traineesJSON, &run.InstructorNotes); err != nil {
+		return model.Run{}, err
+	}
+	if err := json.Unmarshal(scenarioBytes, &run.Scenario); err != nil {
+		return model.Run{}, err
+	}
+	if len(tagsJSON) > 0 {
+		if err := json.Unmarshal(tagsJSON, &run.Tags); err != nil {
+			return model.Run{}, err
+		}
+	}
+	if len(traineesJSON) > 0 {
+		if err := json.Unmarshal(traineesJSON, &run.Trainees); err != nil {
+			return model.Run{}, err
+		}
+	}
+	if startedAt != nil {
+		run.StartedAt = *startedAt
+	}
+	if stoppedAt != nil {
+		run.StoppedAt = *stoppedAt
+	}
+	if archivedAt != nil {
+		run.ArchivedAt = *archivedAt
+	}
+	return run, nil
 }
 
 func scanSnapshotFrame(scan func(dest ...any) error) (model.SnapshotFrame, error) {

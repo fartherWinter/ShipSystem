@@ -79,7 +79,9 @@ If final persistence fails, the process logs the run id and exits non-zero. This
 
 ## Database Safety
 
-Apply migrations before using PostgreSQL mode. The app refuses to start with PostgreSQL unless `schema_migrations` reports the current required version. Empty databases are treated as version `0`, and a database with only `migrations/001_init.sql` is version `1`.
+Apply migrations before using PostgreSQL mode. The app refuses to start with PostgreSQL unless `schema_migrations` reports the current required version. Empty databases are treated as version `0`, a database with only `migrations/001_init.sql` is version `1`, and a database with migrations through `002_snapshot_frames.sql` is version `2`.
+
+Apply `migrations/003_training_product.sql` before deploying the training product workflow to PostgreSQL. It is additive and stores managed scenarios, run metadata, event annotations, and audit logs. Take a backup or platform snapshot before applying migrations to shared, staging, or production data.
 
 Do not run destructive database operations against shared or production data without a backup or a documented preview. Retention pruning supports `GET /api/retention/preview`; use it before `POST /api/retention/prune`.
 
@@ -94,6 +96,8 @@ In authenticated deployments, `/readyz`, `/metrics`, and `/metrics/prometheus` r
 ## API Contract
 
 Publish the matching `docs/openapi.json` with each release. The contract version, `RunReport.version`, scenario versions, and image tag should be traceable together in release notes. See `docs/api.md` for compatibility rules and error-code policy.
+
+Training product deployments should document who can create or disable scenarios, who can archive runs, and how exported reports are retained. The system remains training-only; the abstract assessment module must not be described as tactical guidance or real-world engagement advice.
 
 ## Compose Checks
 

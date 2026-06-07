@@ -132,6 +132,36 @@
             }
           }
         }
+      },
+      "post": {
+        "tags": ["Scenarios"],
+        "summary": "Create a managed training scenario",
+        "description": "Stores a validated training/demo scenario for later runs. This does not provision or command external systems.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Scenario"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created scenario summary",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScenarioSummary"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/api/scenarios/{scenario_id}": {
@@ -156,6 +186,126 @@
           },
           "404": {
             "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": ["Scenarios"],
+        "summary": "Update a managed scenario",
+        "description": "Built-in and file scenarios are read-only templates; copy them before editing.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ScenarioID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Scenario"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated scenario summary",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScenarioSummary"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/scenarios/{scenario_id}/copy": {
+      "post": {
+        "tags": ["Scenarios"],
+        "summary": "Copy a scenario into a managed version",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ScenarioID"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CopyScenarioRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Copied scenario summary",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScenarioSummary"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/scenarios/{scenario_id}/enable": {
+      "post": {
+        "tags": ["Scenarios"],
+        "summary": "Enable a managed scenario",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ScenarioID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Enabled scenario summary",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScenarioSummary"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/scenarios/{scenario_id}/disable": {
+      "post": {
+        "tags": ["Scenarios"],
+        "summary": "Disable a managed scenario without deleting it",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ScenarioID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Disabled scenario summary",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScenarioSummary"
+                }
+              }
+            }
           }
         }
       }
@@ -334,6 +484,124 @@
           },
           "400": {
             "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/runs/{run_id}/metadata": {
+      "put": {
+        "tags": ["Runs"],
+        "summary": "Update run training metadata and archive state",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunMetadata"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Run"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/runs/{run_id}/annotations": {
+      "get": {
+        "tags": ["Reports"],
+        "summary": "List event annotations for a run",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Event annotations",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/EventAnnotation"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": ["Reports"],
+        "summary": "Create an instructor event annotation",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EventAnnotationInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created event annotation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventAnnotation"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/runs/{run_id}/audit": {
+      "get": {
+        "tags": ["Reports"],
+        "summary": "List persisted audit log entries for a run",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunID"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Audit log entries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AuditLog"
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -580,7 +848,7 @@
             "in": "query",
             "schema": {
               "type": "string",
-              "enum": ["json", "csv"]
+              "enum": ["json", "csv", "html", "pdf"]
             }
           }
         ],
@@ -596,6 +864,17 @@
               "text/csv": {
                 "schema": {
                   "type": "string"
+                }
+              },
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "application/pdf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
                 }
               }
             }
@@ -1025,7 +1304,7 @@
       },
       "ScenarioSummary": {
         "type": "object",
-        "required": ["id", "name", "source"],
+        "required": ["id", "name", "source", "enabled"],
         "properties": {
           "id": {
             "type": "string"
@@ -1040,6 +1319,28 @@
             "type": "integer"
           },
           "source": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CopyScenarioRequest": {
+        "type": "object",
+        "properties": {
+          "name": {
             "type": "string"
           }
         }
@@ -1063,6 +1364,21 @@
           "owner_id": {
             "type": "string"
           },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "trainees": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "instructor_notes": {
+            "type": "string"
+          },
           "created_at": {
             "type": "string",
             "format": "date-time"
@@ -1079,11 +1395,39 @@
             "type": "string",
             "format": "date-time"
           },
+          "archived_at": {
+            "type": "string",
+            "format": "date-time"
+          },
           "restored_from_store": {
             "type": "boolean"
           },
           "safety_notice": {
             "type": "string"
+          }
+        }
+      },
+      "RunMetadata": {
+        "type": "object",
+        "required": ["tags", "trainees", "instructor_notes", "archived"],
+        "properties": {
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "trainees": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "instructor_notes": {
+            "type": "string"
+          },
+          "archived": {
+            "type": "boolean"
           }
         }
       },
@@ -1155,6 +1499,81 @@
           },
           "next_cursor": {
             "type": "string"
+          }
+        }
+      },
+      "EventAnnotationInput": {
+        "type": "object",
+        "required": ["note"],
+        "properties": {
+          "event_id": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "actor_id": {
+            "type": "string"
+          }
+        }
+      },
+      "EventAnnotation": {
+        "type": "object",
+        "required": ["id", "run_id", "note", "created_at"],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "event_id": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "actor_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "AuditLog": {
+        "type": "object",
+        "required": ["id", "action", "target_type", "target_id", "occurred_at"],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "scenario_id": {
+            "type": "string"
+          },
+          "actor_id": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string"
+          },
+          "target_type": {
+            "type": "string"
+          },
+          "target_id": {
+            "type": "string"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "payload": {
+            "type": "object",
+            "additionalProperties": true
           }
         }
       },
@@ -1402,9 +1821,45 @@
           }
         }
       },
+      "AssessmentCriterion": {
+        "type": "object",
+        "required": ["name", "value", "note"],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "value": {
+            "type": "integer"
+          },
+          "note": {
+            "type": "string"
+          }
+        }
+      },
+      "TrainingAssessment": {
+        "type": "object",
+        "required": ["score", "label", "criteria", "safety_notice"],
+        "properties": {
+          "score": {
+            "type": "integer"
+          },
+          "label": {
+            "type": "string"
+          },
+          "criteria": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AssessmentCriterion"
+            }
+          },
+          "safety_notice": {
+            "type": "string"
+          }
+        }
+      },
       "RunReport": {
         "type": "object",
-        "required": ["version", "run", "replay_mode", "duration_seconds", "track_count", "action_stats", "event_audit", "threat_summary", "final_tracks", "events", "safety_notice"],
+        "required": ["version", "run", "replay_mode", "duration_seconds", "track_count", "action_stats", "event_audit", "threat_summary", "final_tracks", "events", "annotations", "assessment", "audit_logs", "safety_notice"],
         "properties": {
           "version": {
             "type": "integer"
@@ -1443,6 +1898,21 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/SimEvent"
+            }
+          },
+          "annotations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EventAnnotation"
+            }
+          },
+          "assessment": {
+            "$ref": "#/components/schemas/TrainingAssessment"
+          },
+          "audit_logs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AuditLog"
             }
           },
           "snapshot_range": {

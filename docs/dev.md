@@ -65,10 +65,11 @@ For PostgreSQL/PostGIS mode, create a database and apply migrations in order:
 $env:SHIP_SIM_DATABASE_URL="postgres://user:password@localhost:5432/shipsim?sslmode=disable"
 psql $env:SHIP_SIM_DATABASE_URL -f migrations/001_init.sql
 psql $env:SHIP_SIM_DATABASE_URL -f migrations/002_snapshot_frames.sql
+psql $env:SHIP_SIM_DATABASE_URL -f migrations/003_training_product.sql
 go run ./cmd/sim-server
 ```
 
-PostgreSQL mode has a startup migration gate. The app requires `schema_migrations.name='ship_sim'` to be at the current version before it starts HTTP. Empty databases and v1 databases fail clearly instead of running in a half-migrated state.
+PostgreSQL mode has a startup migration gate. The app requires `schema_migrations.name='ship_sim'` to be at the current version before it starts HTTP. Empty, v1, and v2 databases fail clearly instead of running in a half-migrated state.
 
 Do not run destructive database operations against shared or production data without first taking a backup or using a documented preview/dry-run path. Retention pruning supports a preview API; use it before manual pruning.
 
@@ -107,6 +108,8 @@ npm run generate:types
 ```
 
 The source contract is `docs/openapi.json`; generated frontend API types are written to `web/src/generated/api-types.ts`. See `docs/api.md` for versioning and error-code policy.
+
+Training product workflow APIs support managed scenario upload/copy/enable/disable, run tags, trainees, instructor notes, event annotations, abstract training assessment, JSON/CSV/HTML/PDF report templates, and persisted audit logs. See `docs/training-product.md` before changing those workflows.
 
 ## Unified Commands
 

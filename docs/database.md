@@ -4,7 +4,7 @@ ShipSystem stores training, demonstration, replay, and audit data only. Do not c
 
 ## Migration Gate
 
-PostgreSQL mode requires the application schema to reach `schema_migrations.name='ship_sim'` version `2`.
+PostgreSQL mode requires the application schema to reach `schema_migrations.name='ship_sim'` version `3`.
 
 On startup, the server:
 
@@ -12,16 +12,19 @@ On startup, the server:
 2. Reads the migration status.
 3. Fails before starting HTTP if the current version is lower than the required version.
 
-An empty database or a database without `schema_migrations` is treated as version `0`. A database with only `migrations/001_init.sql` applied is version `1`. Both must be migrated before the app starts in PostgreSQL mode.
+An empty database or a database without `schema_migrations` is treated as version `0`. A database with only `migrations/001_init.sql` applied is version `1`, and a database with `migrations/002_snapshot_frames.sql` applied is version `2`. All must be migrated to version `3` before the app starts in PostgreSQL mode.
 
 Apply migrations in order:
 
 ```powershell
 psql $env:SHIP_SIM_DATABASE_URL -f migrations/001_init.sql
 psql $env:SHIP_SIM_DATABASE_URL -f migrations/002_snapshot_frames.sql
+psql $env:SHIP_SIM_DATABASE_URL -f migrations/003_training_product.sql
 ```
 
 For Docker Compose, migrations are mounted into `/docker-entrypoint-initdb.d` and run when the database volume is first created. Existing volumes are not re-migrated by the Postgres image; apply new migration files manually before restarting the app.
+
+`003_training_product.sql` is additive. It adds managed scenario metadata, run training metadata, event annotations, and audit log tables. It does not delete, truncate, or rewrite existing replay history. Still take a database backup or platform snapshot before applying migrations to shared, staging, or production databases.
 
 ## Destructive Operations
 

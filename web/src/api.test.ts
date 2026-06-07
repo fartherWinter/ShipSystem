@@ -34,7 +34,10 @@ describe("api client helpers", () => {
   it("builds report download paths without token query fallback", () => {
     expect(reportDownloadPath("run-1", "csv")).toBe("/api/runs/run-1/report?format=csv");
     expect(reportDownloadPath("run-1", "json")).toBe("/api/runs/run-1/report");
+    expect(reportDownloadPath("run-1", "html")).toBe("/api/runs/run-1/report?format=html");
+    expect(reportDownloadPath("run-1", "pdf")).toBe("/api/runs/run-1/report?format=pdf");
     expect(reportFilename("run-1", "csv")).toBe("run-run-1-report.csv");
+    expect(reportFilename("run-1", "pdf")).toBe("run-run-1-report.pdf");
 
     setApiToken("secret");
 

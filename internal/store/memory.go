@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+
 	"shipsim/internal/model"
 )
 
@@ -20,6 +22,9 @@ type Memory struct {
 	snaps   map[string][]model.SnapshotFrame
 	zones   map[string][]model.Zone
 	contact map[string][]model.Contact
+	scenes  map[string]model.ScenarioRecord
+	notes   map[string][]model.EventAnnotation
+	audit   []model.AuditLog
 }
 
 func NewMemory() *Memory {
@@ -31,6 +36,8 @@ func NewMemory() *Memory {
 		snaps:   map[string][]model.SnapshotFrame{},
 		zones:   map[string][]model.Zone{},
 		contact: map[string][]model.Contact{},
+		scenes:  map[string]model.ScenarioRecord{},
+		notes:   map[string][]model.EventAnnotation{},
 	}
 }
 
@@ -273,11 +280,143 @@ func (m *Memory) ListZones(_ context.Context, runID string) ([]model.Zone, error
 }
 
 func (m *Memory) ListScenarioSummaries(_ context.Context) ([]model.ScenarioSummary, error) {
-	return nil, nil
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	summaries := make([]model.ScenarioSummary, 0, len(m.scenes))
+	for _, record := range m.scenes {
+		summaries = append(summaries, scenarioSummary(record))
+	}
+	sort.Slice(summaries, func(i, j int) bool {
+		if summaries[i].Name != summaries[j].Name {
+			return summaries[i].Name < summaries[j].Name
+		}
+		return summaries[i].Version > summaries[j].Version
+	})
+	return summaries, nil
 }
 
-func (m *Memory) GetScenario(_ context.Context, _ string) (model.Scenario, error) {
-	return model.Scenario{}, errors.New("scenario not found")
+func (m *Memory) GetScenario(ctx context.Context, id string) (model.Scenario, error) {
+	record, err := m.GetScenarioRecord(ctx, id)
+	if err != nil {
+		return model.Scenario{}, err
+	}
+	return cloneScenario(record.Scenario), nil
+}
+
+func (m *Memory) GetScenarioRecord(_ context.Context, id string) (model.ScenarioRecord, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	record, ok := m.scenes[id]
+	if !ok {
+		return model.ScenarioRecord{}, errors.New("scenario not found")
+	}
+	record.Scenario = cloneScenario(record.Scenario)
+	return record, nil
+}
+
+func (m *Memory) SaveScenario(_ context.Context, record model.ScenarioRecord) (model.ScenarioSummary, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := time.Now().UTC()
+	if record.ID == "" {
+		record.ID = uuid.NewString()
+	}
+	record.Scenario.ID = record.ID
+	if record.Source == "" {
+		record.Source = "database"
+	}
+	if !record.Enabled && record.UpdatedAt.IsZero() {
+		record.Enabled = true
+	}
+	if record.CreatedAt.IsZero() {
+		if existing, ok := m.scenes[record.ID]; ok {
+			record.CreatedAt = existing.CreatedAt
+		} else {
+			record.CreatedAt = now
+		}
+	}
+	record.UpdatedAt = now
+	record.Scenario = cloneScenario(record.Scenario)
+	m.scenes[record.ID] = record
+	return scenarioSummary(record), nil
+}
+
+func (m *Memory) SetScenarioEnabled(_ context.Context, id string, enabled bool, actorID string) (model.ScenarioSummary, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	record, ok := m.scenes[id]
+	if !ok {
+		return model.ScenarioSummary{}, errors.New("scenario not found")
+	}
+	record.Enabled = enabled
+	record.UpdatedAt = time.Now().UTC()
+	if actorID != "" && record.CreatedBy == "" {
+		record.CreatedBy = actorID
+	}
+	m.scenes[id] = record
+	return scenarioSummary(record), nil
+}
+
+func (m *Memory) SaveEventAnnotation(_ context.Context, annotation model.EventAnnotation) (model.EventAnnotation, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.runs[annotation.RunID]; !ok {
+		return model.EventAnnotation{}, errors.New("run not found")
+	}
+	if annotation.ID == "" {
+		annotation.ID = uuid.NewString()
+	}
+	if annotation.CreatedAt.IsZero() {
+		annotation.CreatedAt = time.Now().UTC()
+	}
+	m.notes[annotation.RunID] = append(m.notes[annotation.RunID], annotation)
+	return annotation, nil
+}
+
+func (m *Memory) ListEventAnnotations(_ context.Context, runID string) ([]model.EventAnnotation, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	annotations := append([]model.EventAnnotation(nil), m.notes[runID]...)
+	sort.Slice(annotations, func(i, j int) bool {
+		return annotations[i].CreatedAt.Before(annotations[j].CreatedAt)
+	})
+	return annotations, nil
+}
+
+func (m *Memory) SaveAuditLog(_ context.Context, log model.AuditLog) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if log.ID == "" {
+		log.ID = uuid.NewString()
+	}
+	if log.OccurredAt.IsZero() {
+		log.OccurredAt = time.Now().UTC()
+	}
+	log.Payload = cloneMap(log.Payload)
+	m.audit = append(m.audit, log)
+	return nil
+}
+
+func (m *Memory) ListAuditLogs(_ context.Context, query model.AuditLogQuery) ([]model.AuditLog, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	limit := normalizeLimit(query.Limit, 50, 200)
+	logs := make([]model.AuditLog, 0, min(limit, len(m.audit)))
+	for i := len(m.audit) - 1; i >= 0; i-- {
+		log := m.audit[i]
+		if query.RunID != "" && log.RunID != query.RunID {
+			continue
+		}
+		if query.ScenarioID != "" && log.ScenarioID != query.ScenarioID {
+			continue
+		}
+		log.Payload = cloneMap(log.Payload)
+		logs = append(logs, log)
+		if len(logs) == limit {
+			break
+		}
+	}
+	return logs, nil
 }
 
 func (m *Memory) PreviewPrune(_ context.Context, policy model.RetentionPolicy) (model.RetentionPreview, error) {
@@ -566,6 +705,44 @@ func cloneTracks(tracks []model.Track) []model.Track {
 
 func cloneContacts(contacts []model.Contact) []model.Contact {
 	return append([]model.Contact(nil), contacts...)
+}
+
+func cloneScenario(s model.Scenario) model.Scenario {
+	out := s
+	out.Sensors = append([]model.Sensor(nil), s.Sensors...)
+	out.Zones = append([]model.Zone(nil), s.Zones...)
+	for i := range out.Zones {
+		out.Zones[i].Polygon = append([]model.Vec3(nil), s.Zones[i].Polygon...)
+	}
+	out.Tracks = append([]model.Track(nil), s.Tracks...)
+	out.Contacts = append([]model.Contact(nil), s.Contacts...)
+	out.AllowedActions = append([]string(nil), s.AllowedActions...)
+	return out
+}
+
+func scenarioSummary(record model.ScenarioRecord) model.ScenarioSummary {
+	return model.ScenarioSummary{
+		ID:          record.ID,
+		Name:        record.Scenario.Name,
+		Description: record.Scenario.Description,
+		Version:     record.Scenario.Version,
+		Source:      record.Source,
+		Enabled:     record.Enabled,
+		CreatedBy:   record.CreatedBy,
+		CreatedAt:   record.CreatedAt,
+		UpdatedAt:   record.UpdatedAt,
+	}
+}
+
+func cloneMap(input map[string]any) map[string]any {
+	if input == nil {
+		return nil
+	}
+	out := make(map[string]any, len(input))
+	for key, value := range input {
+		out[key] = value
+	}
+	return out
 }
 
 func absDuration(value time.Duration) time.Duration {

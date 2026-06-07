@@ -60,45 +60,57 @@ type Scenario struct {
 }
 
 type Run struct {
-	ID           string    `json:"id"`
-	Name         string    `json:"name"`
-	Status       RunStatus `json:"status"`
-	Scenario     Scenario  `json:"scenario"`
-	OwnerID      string    `json:"owner_id,omitempty"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
-	StartedAt    time.Time `json:"started_at,omitempty"`
-	StoppedAt    time.Time `json:"stopped_at,omitempty"`
-	Restored     bool      `json:"restored_from_store,omitempty"`
-	SafetyNotice string    `json:"safety_notice"`
+	ID              string    `json:"id"`
+	Name            string    `json:"name"`
+	Status          RunStatus `json:"status"`
+	Scenario        Scenario  `json:"scenario"`
+	OwnerID         string    `json:"owner_id,omitempty"`
+	Tags            []string  `json:"tags,omitempty"`
+	Trainees        []string  `json:"trainees,omitempty"`
+	InstructorNotes string    `json:"instructor_notes,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+	StartedAt       time.Time `json:"started_at,omitempty"`
+	StoppedAt       time.Time `json:"stopped_at,omitempty"`
+	ArchivedAt      time.Time `json:"archived_at,omitempty"`
+	Restored        bool      `json:"restored_from_store,omitempty"`
+	SafetyNotice    string    `json:"safety_notice"`
 }
 
 func (r Run) MarshalJSON() ([]byte, error) {
 	type runJSON struct {
-		ID           string     `json:"id"`
-		Name         string     `json:"name"`
-		Status       RunStatus  `json:"status"`
-		Scenario     Scenario   `json:"scenario"`
-		OwnerID      string     `json:"owner_id,omitempty"`
-		CreatedAt    time.Time  `json:"created_at"`
-		UpdatedAt    time.Time  `json:"updated_at"`
-		StartedAt    *time.Time `json:"started_at,omitempty"`
-		StoppedAt    *time.Time `json:"stopped_at,omitempty"`
-		Restored     bool       `json:"restored_from_store,omitempty"`
-		SafetyNotice string     `json:"safety_notice"`
+		ID              string     `json:"id"`
+		Name            string     `json:"name"`
+		Status          RunStatus  `json:"status"`
+		Scenario        Scenario   `json:"scenario"`
+		OwnerID         string     `json:"owner_id,omitempty"`
+		Tags            []string   `json:"tags,omitempty"`
+		Trainees        []string   `json:"trainees,omitempty"`
+		InstructorNotes string     `json:"instructor_notes,omitempty"`
+		CreatedAt       time.Time  `json:"created_at"`
+		UpdatedAt       time.Time  `json:"updated_at"`
+		StartedAt       *time.Time `json:"started_at,omitempty"`
+		StoppedAt       *time.Time `json:"stopped_at,omitempty"`
+		ArchivedAt      *time.Time `json:"archived_at,omitempty"`
+		Restored        bool       `json:"restored_from_store,omitempty"`
+		SafetyNotice    string     `json:"safety_notice"`
 	}
 	return json.Marshal(runJSON{
-		ID:           r.ID,
-		Name:         r.Name,
-		Status:       r.Status,
-		Scenario:     r.Scenario,
-		OwnerID:      r.OwnerID,
-		CreatedAt:    r.CreatedAt,
-		UpdatedAt:    r.UpdatedAt,
-		StartedAt:    optionalTime(r.StartedAt),
-		StoppedAt:    optionalTime(r.StoppedAt),
-		Restored:     r.Restored,
-		SafetyNotice: r.SafetyNotice,
+		ID:              r.ID,
+		Name:            r.Name,
+		Status:          r.Status,
+		Scenario:        r.Scenario,
+		OwnerID:         r.OwnerID,
+		Tags:            r.Tags,
+		Trainees:        r.Trainees,
+		InstructorNotes: r.InstructorNotes,
+		CreatedAt:       r.CreatedAt,
+		UpdatedAt:       r.UpdatedAt,
+		StartedAt:       optionalTime(r.StartedAt),
+		StoppedAt:       optionalTime(r.StoppedAt),
+		ArchivedAt:      optionalTime(r.ArchivedAt),
+		Restored:        r.Restored,
+		SafetyNotice:    r.SafetyNotice,
 	})
 }
 
@@ -110,11 +122,32 @@ func optionalTime(t time.Time) *time.Time {
 }
 
 type ScenarioSummary struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-	Version     int    `json:"version,omitempty"`
-	Source      string `json:"source"`
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description,omitempty"`
+	Version     int       `json:"version,omitempty"`
+	Source      string    `json:"source"`
+	Enabled     bool      `json:"enabled"`
+	CreatedBy   string    `json:"created_by,omitempty"`
+	CreatedAt   time.Time `json:"created_at,omitempty"`
+	UpdatedAt   time.Time `json:"updated_at,omitempty"`
+}
+
+type ScenarioRecord struct {
+	ID        string
+	Scenario  Scenario
+	Source    string
+	Enabled   bool
+	CreatedBy string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+type RunMetadata struct {
+	Tags            []string `json:"tags"`
+	Trainees        []string `json:"trainees"`
+	InstructorNotes string   `json:"instructor_notes"`
+	Archived        bool     `json:"archived"`
 }
 
 type StoreStatus struct {
@@ -262,6 +295,46 @@ type ActorStat struct {
 	Count   int    `json:"count"`
 }
 
+type EventAnnotation struct {
+	ID        string    `json:"id"`
+	RunID     string    `json:"run_id"`
+	EventID   string    `json:"event_id,omitempty"`
+	Note      string    `json:"note"`
+	ActorID   string    `json:"actor_id,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type AuditLog struct {
+	ID         string         `json:"id"`
+	RunID      string         `json:"run_id,omitempty"`
+	ScenarioID string         `json:"scenario_id,omitempty"`
+	ActorID    string         `json:"actor_id,omitempty"`
+	Action     string         `json:"action"`
+	TargetType string         `json:"target_type"`
+	TargetID   string         `json:"target_id"`
+	OccurredAt time.Time      `json:"occurred_at"`
+	Payload    map[string]any `json:"payload,omitempty"`
+}
+
+type AuditLogQuery struct {
+	RunID      string
+	ScenarioID string
+	Limit      int
+}
+
+type AssessmentCriterion struct {
+	Name  string `json:"name"`
+	Value int    `json:"value"`
+	Note  string `json:"note"`
+}
+
+type TrainingAssessment struct {
+	Score        int                   `json:"score"`
+	Label        string                `json:"label"`
+	Criteria     []AssessmentCriterion `json:"criteria"`
+	SafetyNotice string                `json:"safety_notice"`
+}
+
 type EventAuditSummary struct {
 	EventCount    int          `json:"event_count"`
 	ActionStats   []ActionStat `json:"action_stats"`
@@ -297,6 +370,9 @@ type RunReport struct {
 	ThreatSummary    ThreatSummary        `json:"threat_summary"`
 	FinalTracks      []TrackStatusSummary `json:"final_tracks"`
 	Events           []SimEvent           `json:"events"`
+	Annotations      []EventAnnotation    `json:"annotations"`
+	Assessment       TrainingAssessment   `json:"assessment"`
+	AuditLogs        []AuditLog           `json:"audit_logs"`
 	SnapshotRange    *SnapshotRange       `json:"snapshot_range,omitempty"`
 	SnapshotCoverage *SnapshotCoverage    `json:"snapshot_coverage,omitempty"`
 	SafetyNotice     string               `json:"safety_notice"`

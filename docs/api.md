@@ -28,10 +28,26 @@ When changing an API payload, update `docs/openapi.json`, regenerate frontend ty
 - OpenAPI `info.version` follows semantic versioning for the published contract.
 - The current unversioned `/api/...` routes are treated as API v1. Breaking response or request changes require either a new route family such as `/api/v2/...` or a documented major contract version.
 - Additive optional JSON fields are allowed in v1. Removing fields, changing required fields, changing field meanings, or changing enum values is breaking.
-- `RunReport.version` is the report payload version. Current JSON reports use `version: 1`.
+- `RunReport.version` is the report payload version. Current JSON reports use `version: 2`.
 - Scenario payloads use `scenario.version` as scenario-content version metadata. Built-in and uploaded scenarios should keep version numbers stable for auditability.
 - Snapshot and run payloads are versioned by the OpenAPI schema. Add new optional fields for compatible changes; do not change existing field meanings in-place.
-- CSV report export is a convenience format derived from the JSON report. Additive rows are compatible; removing or renaming existing row sections is breaking.
+- CSV, HTML, and PDF report exports are convenience templates derived from the JSON report. Additive CSV rows and additive HTML/PDF sections are compatible; removing or renaming existing report sections is breaking.
+
+## Training Product API
+
+Stage 9 training product routes are still training/demo/audit routes:
+
+- `POST /api/scenarios` stores a validated managed scenario.
+- `PUT /api/scenarios/{scenario_id}` updates managed database scenarios. Built-in and file scenarios are read-only templates.
+- `POST /api/scenarios/{scenario_id}/copy` copies any visible scenario into a managed scenario version.
+- `POST /api/scenarios/{scenario_id}/enable` and `/disable` toggle managed scenario availability without deleting records.
+- `PUT /api/runs/{run_id}/metadata` updates tags, trainees, instructor notes, and archive state.
+- `GET/POST /api/runs/{run_id}/annotations` reads and creates instructor event annotations.
+- `GET /api/runs/{run_id}/audit` returns persisted audit log entries for the run.
+
+Disabled scenarios remain readable for audit and can be re-enabled, but cannot be used to create new runs.
+
+`RunReport.version: 2` adds `annotations`, `assessment`, and `audit_logs`. The assessment is an abstract training-record completeness score; it must not be used or described as real tactical advice.
 
 ## Error Shape
 
@@ -61,6 +77,7 @@ Common error codes:
 | `snapshot_not_found` | No snapshot exists near the requested time. |
 | `invalid_time_range` | A time query parameter is not RFC3339. |
 | `action_type_required` | Training action request omitted `type`. |
+| `unsupported_report_format` | Report export format is not `json`, `csv`, `html`, or `pdf`. |
 | `invalid_retention_policy` | Retention preview/prune input is invalid. |
 | `empty_retention_policy` | Retention prune request would be destructive but has no actual pruning criteria. |
 | `retention_preview_failed` | Retention preview failed. |

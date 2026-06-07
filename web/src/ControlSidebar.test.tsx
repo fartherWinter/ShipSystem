@@ -110,9 +110,13 @@ describe("ControlSidebar", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Export report JSON" }));
     fireEvent.click(screen.getByRole("button", { name: "Export report CSV" }));
+    fireEvent.click(screen.getByRole("button", { name: "Export report HTML" }));
+    fireEvent.click(screen.getByRole("button", { name: "Export report PDF" }));
 
     expect(onExportReport).toHaveBeenCalledWith("json");
     expect(onExportReport).toHaveBeenCalledWith("csv");
+    expect(onExportReport).toHaveBeenCalledWith("html");
+    expect(onExportReport).toHaveBeenCalledWith("pdf");
   });
 });
 
@@ -147,6 +151,10 @@ function renderSidebar(overrides: Partial<SidebarProps> = {}) {
     onSelectRun: vi.fn(),
     onSelectScenario: vi.fn(),
     onScenarioFile: vi.fn(),
+    onCopyScenario: vi.fn(),
+    onSetScenarioEnabled: vi.fn(),
+    onSaveRunMetadata: vi.fn(),
+    onAddAnnotation: vi.fn(),
     onThreatFilter: vi.fn(),
     onReplayIndex: vi.fn(),
     onReplayStep: vi.fn(),
@@ -167,7 +175,7 @@ function renderSidebar(overrides: Partial<SidebarProps> = {}) {
 }
 
 function sampleScenario(): ScenarioSummary {
-  return { id: "demo", name: "Demo Scenario", version: 1, source: "builtin" };
+  return { id: "demo", name: "Demo Scenario", version: 1, source: "builtin", enabled: true };
 }
 
 function sampleRun(): Run {
@@ -188,6 +196,9 @@ function sampleRun(): Run {
     },
     created_at: "2026-06-08T00:00:00Z",
     updated_at: "2026-06-08T00:02:00Z",
+    tags: ["demo"],
+    trainees: ["student"],
+    instructor_notes: "Reviewed.",
     safety_notice: "Training simulation only."
   };
 }
@@ -267,7 +278,7 @@ function sampleEvent(): SimEvent {
 
 function sampleReport(overrides: Partial<RunReport> = {}): RunReport {
   return {
-    version: 1,
+    version: 2,
     run: sampleRun(),
     replay_mode: "snapshot",
     duration_seconds: 120,
@@ -285,6 +296,34 @@ function sampleReport(overrides: Partial<RunReport> = {}): RunReport {
     },
     final_tracks: [],
     events: [sampleEvent()],
+    annotations: [
+      {
+        id: "annotation-1",
+        run_id: "run-1",
+        event_id: "event-1",
+        note: "Reviewed.",
+        actor_id: "instructor",
+        created_at: "2026-06-08T00:03:00Z"
+      }
+    ],
+    assessment: {
+      score: 80,
+      label: "complete_training_record",
+      criteria: [{ name: "training_actions", value: 80, note: "Abstract training evaluation only." }],
+      safety_notice: "Training simulation only."
+    },
+    audit_logs: [
+      {
+        id: "audit-1",
+        run_id: "run-1",
+        actor_id: "instructor",
+        action: "run.action_submitted",
+        target_type: "event",
+        target_id: "event-1",
+        occurred_at: "2026-06-08T00:02:30Z",
+        payload: { training_only: true }
+      }
+    ],
     snapshot_range: {
       from: "2026-06-08T00:00:00Z",
       to: "2026-06-08T00:05:00Z",

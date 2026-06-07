@@ -27,6 +27,13 @@ type Store interface {
 	ListZones(context.Context, string) ([]model.Zone, error)
 	ListScenarioSummaries(context.Context) ([]model.ScenarioSummary, error)
 	GetScenario(context.Context, string) (model.Scenario, error)
+	GetScenarioRecord(context.Context, string) (model.ScenarioRecord, error)
+	SaveScenario(context.Context, model.ScenarioRecord) (model.ScenarioSummary, error)
+	SetScenarioEnabled(context.Context, string, bool, string) (model.ScenarioSummary, error)
+	SaveEventAnnotation(context.Context, model.EventAnnotation) (model.EventAnnotation, error)
+	ListEventAnnotations(context.Context, string) ([]model.EventAnnotation, error)
+	SaveAuditLog(context.Context, model.AuditLog) error
+	ListAuditLogs(context.Context, model.AuditLogQuery) ([]model.AuditLog, error)
 	PreviewPrune(context.Context, model.RetentionPolicy) (model.RetentionPreview, error)
 	Prune(context.Context, model.RetentionPolicy) (model.RetentionResult, error)
 	Close()

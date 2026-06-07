@@ -36,7 +36,8 @@ func TestMigrationStatusRequiresCurrentVersion(t *testing.T) {
 	}{
 		{name: "empty database", current: 0, wantErr: true},
 		{name: "v1 database", current: 1, wantErr: true},
-		{name: "v2 database", current: CurrentMigrationVersion, wantErr: false},
+		{name: "v2 database", current: 2, wantErr: true},
+		{name: "v3 database", current: CurrentMigrationVersion, wantErr: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -121,6 +122,52 @@ func testStoreContract(t *testing.T, st Store) {
 	if err := st.SaveRun(ctx, run); err != nil {
 		t.Fatalf("save run: %v", err)
 	}
+	scenarioSummary, err := st.SaveScenario(ctx, model.ScenarioRecord{
+		Scenario: model.Scenario{
+			Name:            "store-contract-" + runID[:8],
+			Description:     "Store contract scenario.",
+			Version:         1,
+			Seed:            7,
+			TickHz:          20,
+			SnapshotHz:      10,
+			InitialContacts: 1,
+			Ownship:         model.Vec3{Lon: 121.5, Lat: 31.2},
+			AllowedActions:  []string{"maneuver"},
+			Sensors: []model.Sensor{
+				{ID: "sim-sensor-1", Name: "Simulated Sensor", Kind: "simulated_sensor", Position: model.Vec3{Lon: 121.5, Lat: 31.2}},
+			},
+		},
+		Source:    "database",
+		Enabled:   true,
+		CreatedBy: "tester",
+	})
+	if err != nil {
+		t.Fatalf("save scenario: %v", err)
+	}
+	if !scenarioSummary.Enabled || scenarioSummary.ID == "" {
+		t.Fatalf("expected enabled scenario summary, got %+v", scenarioSummary)
+	}
+	scenarioRecord, err := st.GetScenarioRecord(ctx, scenarioSummary.ID)
+	if err != nil {
+		t.Fatalf("get scenario record: %v", err)
+	}
+	if scenarioRecord.Scenario.Name != scenarioSummary.Name || !scenarioRecord.Enabled {
+		t.Fatalf("unexpected scenario record: %+v", scenarioRecord)
+	}
+	disabled, err := st.SetScenarioEnabled(ctx, scenarioSummary.ID, false, "tester")
+	if err != nil {
+		t.Fatalf("disable scenario: %v", err)
+	}
+	if disabled.Enabled {
+		t.Fatalf("expected disabled scenario, got %+v", disabled)
+	}
+	enabled, err := st.SetScenarioEnabled(ctx, scenarioSummary.ID, true, "tester")
+	if err != nil {
+		t.Fatalf("enable scenario: %v", err)
+	}
+	if !enabled.Enabled {
+		t.Fatalf("expected enabled scenario, got %+v", enabled)
+	}
 	runs, err := st.ListRuns(ctx, 10)
 	if err != nil {
 		t.Fatalf("list runs: %v", err)
@@ -145,6 +192,39 @@ func testStoreContract(t *testing.T, st Store) {
 	}
 	if len(page.Items) != 1 {
 		t.Fatalf("expected one event, got %d", len(page.Items))
+	}
+	annotation, err := st.SaveEventAnnotation(ctx, model.EventAnnotation{
+		RunID:   runID,
+		EventID: page.Items[0].ID,
+		Note:    "Instructor note",
+		ActorID: "tester",
+	})
+	if err != nil {
+		t.Fatalf("save annotation: %v", err)
+	}
+	annotations, err := st.ListEventAnnotations(ctx, runID)
+	if err != nil {
+		t.Fatalf("list annotations: %v", err)
+	}
+	if len(annotations) != 1 || annotations[0].ID != annotation.ID {
+		t.Fatalf("expected saved annotation, got %+v", annotations)
+	}
+	if err := st.SaveAuditLog(ctx, model.AuditLog{
+		RunID:      runID,
+		ActorID:    "tester",
+		Action:     "test.audit",
+		TargetType: "run",
+		TargetID:   runID,
+		Payload:    map[string]any{"training_only": true},
+	}); err != nil {
+		t.Fatalf("save audit log: %v", err)
+	}
+	auditLogs, err := st.ListAuditLogs(ctx, model.AuditLogQuery{RunID: runID, Limit: 10})
+	if err != nil {
+		t.Fatalf("list audit logs: %v", err)
+	}
+	if len(auditLogs) != 1 || auditLogs[0].Action != "test.audit" {
+		t.Fatalf("expected audit log, got %+v", auditLogs)
 	}
 
 	track := model.Track{

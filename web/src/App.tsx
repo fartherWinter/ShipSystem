@@ -3,8 +3,11 @@ import { X } from "lucide-react";
 import { ControlSidebar, type ReportExportFormat, type ReplaySpeed } from "./ControlSidebar";
 import { SimulationMap } from "./SimulationMap";
 import {
+  addAnnotation,
   ApiRequestError,
   commandRun,
+  copyScenario,
+  createScenario,
   createWebSocketTicket,
   createRun,
   clearApiToken,
@@ -19,14 +22,17 @@ import {
   listTracks,
   listZones,
   reportFilename,
+  setScenarioEnabled,
   setApiToken,
   submitTrainingAction,
-  toWsUrl
+  toWsUrl,
+  updateRunMetadata
 } from "./api";
 import { apiBase, authMode } from "./config";
 import type {
   ConnectionState,
   Run,
+  RunMetadata,
   RunReport,
   Scenario,
   ScenarioSummary,
@@ -223,10 +229,52 @@ export function App() {
   async function handleScenarioFile(file: File) {
     await withBusy(async () => {
       const scenario = JSON.parse(await file.text()) as Scenario;
-      const nextRun = await createRun({ scenario });
+      const savedScenario = await createScenario(scenario);
+      const nextScenarios = await listScenarios();
+      setScenarios(nextScenarios);
+      setSelectedScenarioID(savedScenario.id);
+      const nextRun = await createRun({ scenario_id: savedScenario.id });
       await loadRunData(nextRun);
       await refreshRuns();
-      prependLocalEvent(`Created run ${shortID(nextRun.id)} from uploaded scenario`, nextRun.id);
+      prependLocalEvent(`Created run ${shortID(nextRun.id)} from uploaded scenario ${savedScenario.name}`, nextRun.id);
+    });
+  }
+
+  async function handleCopyScenario(name: string) {
+    if (!selectedScenarioID) return;
+    await withBusy(async () => {
+      const copied = await copyScenario(selectedScenarioID, name);
+      const nextScenarios = await listScenarios();
+      setScenarios(nextScenarios);
+      setSelectedScenarioID(copied.id);
+    });
+  }
+
+  async function handleSetScenarioEnabled(enabled: boolean) {
+    if (!selectedScenarioID) return;
+    await withBusy(async () => {
+      const summary = await setScenarioEnabled(selectedScenarioID, enabled);
+      const nextScenarios = await listScenarios();
+      setScenarios(nextScenarios);
+      setSelectedScenarioID(summary.id);
+    });
+  }
+
+  async function handleSaveRunMetadata(metadata: RunMetadata) {
+    if (!run) return;
+    await withBusy(async () => {
+      const nextRun = await updateRunMetadata(run.id, metadata);
+      setRun(nextRun);
+      await refreshRuns();
+      await refreshReplayData(nextRun.id);
+    });
+  }
+
+  async function handleAddAnnotation(eventID: string, note: string) {
+    if (!run) return;
+    await withBusy(async () => {
+      await addAnnotation(run.id, { event_id: eventID, note });
+      await refreshReplayData(run.id);
     });
   }
 
@@ -487,6 +535,10 @@ export function App() {
         onSelectRun={handleSelectRun}
         onSelectScenario={setSelectedScenarioID}
         onScenarioFile={handleScenarioFile}
+        onCopyScenario={handleCopyScenario}
+        onSetScenarioEnabled={handleSetScenarioEnabled}
+        onSaveRunMetadata={handleSaveRunMetadata}
+        onAddAnnotation={handleAddAnnotation}
         onThreatFilter={setThreatFilter}
         onReplayIndex={handleReplayIndex}
         onReplayStep={handleReplayStep}

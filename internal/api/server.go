@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"log/slog"
 	"net"
@@ -371,8 +372,12 @@ func (s *Server) runs(w http.ResponseWriter, r *http.Request) {
 		}
 		scenario := req.Scenario
 		if req.ScenarioID != "" {
-			selected, ok := s.manager.Scenario(r.Context(), req.ScenarioID)
-			if !ok {
+			selected, found, err := s.manager.ScenarioForRun(r.Context(), req.ScenarioID)
+			if err != nil {
+				writeManagerError(w, err)
+				return
+			}
+			if !found {
 				writeError(w, http.StatusNotFound, "scenario_not_found", errors.New("scenario not found"))
 				return
 			}
@@ -512,34 +517,100 @@ func (s *Server) scenarios(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	if r.Method != http.MethodGet {
+	switch r.Method {
+	case http.MethodGet:
+		scenarios, err := s.manager.ListScenarios(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "list_scenarios_failed", err)
+			return
+		}
+		writeJSON(w, http.StatusOK, scenarios)
+	case http.MethodPost:
+		var scenario model.Scenario
+		if err := s.decodeJSON(r, &scenario); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_json", err)
+			return
+		}
+		summary, err := s.manager.CreateScenario(r.Context(), userFromContext(r.Context()), scenario)
+		if err != nil {
+			writeManagerError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, summary)
+	default:
 		methodNotAllowed(w)
-		return
 	}
-	scenarios, err := s.manager.ListScenarios(r.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "list_scenarios_failed", err)
-		return
-	}
-	writeJSON(w, http.StatusOK, scenarios)
 }
 
 func (s *Server) scenario(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		methodNotAllowed(w)
-		return
-	}
-	id := strings.TrimPrefix(r.URL.Path, "/api/scenarios/")
-	if id == "" {
+	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/scenarios/"), "/")
+	if len(parts) == 0 || parts[0] == "" {
 		http.NotFound(w, r)
 		return
 	}
-	scenario, ok := s.manager.Scenario(r.Context(), id)
-	if !ok {
-		writeError(w, http.StatusNotFound, "scenario_not_found", errors.New("scenario not found"))
+	id := parts[0]
+	if len(parts) == 1 {
+		switch r.Method {
+		case http.MethodGet:
+			scenario, ok := s.manager.Scenario(r.Context(), id)
+			if !ok {
+				writeError(w, http.StatusNotFound, "scenario_not_found", errors.New("scenario not found"))
+				return
+			}
+			writeJSON(w, http.StatusOK, scenario)
+		case http.MethodPut:
+			var scenario model.Scenario
+			if err := s.decodeJSON(r, &scenario); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid_json", err)
+				return
+			}
+			summary, err := s.manager.UpdateScenario(r.Context(), id, userFromContext(r.Context()), scenario)
+			if err != nil {
+				writeManagerError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, summary)
+		default:
+			methodNotAllowed(w)
+		}
 		return
 	}
-	writeJSON(w, http.StatusOK, scenario)
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	switch parts[1] {
+	case "copy":
+		var req struct {
+			Name string `json:"name"`
+		}
+		if err := s.decodeJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_json", err)
+			return
+		}
+		summary, err := s.manager.CopyScenario(r.Context(), id, req.Name, userFromContext(r.Context()))
+		if err != nil {
+			writeManagerError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, summary)
+	case "enable":
+		summary, err := s.manager.SetScenarioEnabled(r.Context(), id, true, userFromContext(r.Context()))
+		if err != nil {
+			writeManagerError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, summary)
+	case "disable":
+		summary, err := s.manager.SetScenarioEnabled(r.Context(), id, false, userFromContext(r.Context()))
+		if err != nil {
+			writeManagerError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, summary)
+	default:
+		http.NotFound(w, r)
+	}
 }
 
 func (s *Server) run(w http.ResponseWriter, r *http.Request) {
@@ -584,6 +655,12 @@ func (s *Server) run(w http.ResponseWriter, r *http.Request) {
 		s.runCommand(w, r, runID, s.manager.Stop)
 	case "actions":
 		s.actions(w, r, runID)
+	case "metadata":
+		s.runMetadata(w, r, runID)
+	case "annotations":
+		s.annotations(w, r, runID)
+	case "audit":
+		s.auditLogs(w, r, runID)
 	case "tracks":
 		s.tracks(w, r, runID)
 	case "track-points":
@@ -642,6 +719,66 @@ func (s *Server) actions(w http.ResponseWriter, r *http.Request, runID string) {
 		return
 	}
 	writeJSON(w, http.StatusAccepted, event)
+}
+
+func (s *Server) runMetadata(w http.ResponseWriter, r *http.Request, runID string) {
+	if r.Method != http.MethodPut {
+		methodNotAllowed(w)
+		return
+	}
+	var metadata model.RunMetadata
+	if err := s.decodeJSON(r, &metadata); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json", err)
+		return
+	}
+	run, err := s.manager.UpdateRunMetadata(r.Context(), runID, metadata, userFromContext(r.Context()))
+	if err != nil {
+		writeManagerError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, run)
+}
+
+func (s *Server) annotations(w http.ResponseWriter, r *http.Request, runID string) {
+	switch r.Method {
+	case http.MethodGet:
+		annotations, err := s.manager.EventAnnotations(r.Context(), runID)
+		if err != nil {
+			writeManagerError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, annotations)
+	case http.MethodPost:
+		var annotation model.EventAnnotation
+		if err := s.decodeJSON(r, &annotation); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_json", err)
+			return
+		}
+		saved, err := s.manager.AddEventAnnotation(r.Context(), runID, annotation, userFromContext(r.Context()))
+		if err != nil {
+			writeManagerError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, saved)
+	default:
+		methodNotAllowed(w)
+	}
+}
+
+func (s *Server) auditLogs(w http.ResponseWriter, r *http.Request, runID string) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	logs, err := s.manager.AuditLogs(r.Context(), model.AuditLogQuery{
+		RunID: runID,
+		Limit: intQuery(r, "limit", 50, 200),
+	})
+	if err != nil {
+		writeManagerError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, logs)
 }
 
 func (s *Server) tracks(w http.ResponseWriter, r *http.Request, runID string) {
@@ -773,11 +910,26 @@ func (s *Server) report(w http.ResponseWriter, r *http.Request, runID string) {
 		writeManagerError(w, err)
 		return
 	}
-	if strings.EqualFold(r.URL.Query().Get("format"), "csv") {
-		writeReportCSV(w, report)
-		return
+	format := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("format")))
+	if format == "" {
+		format = "json"
 	}
-	writeJSON(w, http.StatusOK, report)
+	switch format {
+	case "json":
+		s.manager.RecordReportExport(r.Context(), runID, userFromContext(r.Context()), format)
+		writeJSON(w, http.StatusOK, report)
+	case "csv":
+		s.manager.RecordReportExport(r.Context(), runID, userFromContext(r.Context()), format)
+		writeReportCSV(w, report)
+	case "html":
+		s.manager.RecordReportExport(r.Context(), runID, userFromContext(r.Context()), format)
+		writeReportHTML(w, report)
+	case "pdf":
+		s.manager.RecordReportExport(r.Context(), runID, userFromContext(r.Context()), format)
+		writeReportPDF(w, report)
+	default:
+		writeError(w, http.StatusBadRequest, "unsupported_report_format", errors.New("format must be json, csv, html, or pdf"))
+	}
 }
 
 func (s *Server) wsTicket(w http.ResponseWriter, r *http.Request, runID string) {
@@ -971,6 +1123,11 @@ func writeReportCSV(w http.ResponseWriter, report model.RunReport) {
 	_ = writer.Write([]string{"summary", "duration_seconds", strconv.FormatInt(report.DurationSeconds, 10)})
 	_ = writer.Write([]string{"summary", "track_count", strconv.Itoa(report.TrackCount)})
 	_ = writer.Write([]string{"summary", "high_watermark", strconv.Itoa(report.ThreatSummary.HighWatermark)})
+	_ = writer.Write([]string{"assessment", "score", strconv.Itoa(report.Assessment.Score)})
+	_ = writer.Write([]string{"assessment", "label", report.Assessment.Label})
+	for _, criterion := range report.Assessment.Criteria {
+		_ = writer.Write([]string{"assessment_criterion", criterion.Name, strconv.Itoa(criterion.Value)})
+	}
 	if report.SnapshotCoverage != nil {
 		_ = writer.Write([]string{"snapshot", "from", report.SnapshotCoverage.From.Format(time.RFC3339)})
 		_ = writer.Write([]string{"snapshot", "to", report.SnapshotCoverage.To.Format(time.RFC3339)})
@@ -997,7 +1154,111 @@ func writeReportCSV(w http.ResponseWriter, report model.RunReport) {
 		payload, _ := json.Marshal(event.Payload)
 		_ = writer.Write([]string{"event", event.OccurredAt.Format(time.RFC3339), string(payload)})
 	}
+	for _, annotation := range report.Annotations {
+		_ = writer.Write([]string{"annotation", annotation.CreatedAt.Format(time.RFC3339), annotation.Note})
+	}
+	for _, auditLog := range report.AuditLogs {
+		_ = writer.Write([]string{"audit_log", auditLog.OccurredAt.Format(time.RFC3339), auditLog.Action})
+	}
 	writer.Flush()
+}
+
+func writeReportHTML(w http.ResponseWriter, report model.RunReport) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="run-%s-report.html"`, report.Run.ID))
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintf(w, "<!doctype html><html><head><meta charset=\"utf-8\"><title>Training Report %s</title>", html.EscapeString(report.Run.ID))
+	fmt.Fprint(w, "<style>body{font-family:Arial,sans-serif;color:#102033;margin:32px;line-height:1.4}table{border-collapse:collapse;width:100%;margin:16px 0}td,th{border:1px solid #ccd7e3;padding:8px;text-align:left}h1,h2{margin-bottom:8px}.notice{border:1px solid #8fb3d9;background:#eef6ff;padding:10px}</style></head><body>")
+	fmt.Fprintf(w, "<h1>%s</h1><p class=\"notice\">%s</p>", html.EscapeString(report.Run.Name), html.EscapeString(report.SafetyNotice))
+	fmt.Fprintf(w, "<table><tr><th>Run ID</th><td>%s</td></tr><tr><th>Status</th><td>%s</td></tr><tr><th>Report Version</th><td>%d</td></tr><tr><th>Duration</th><td>%ds</td></tr><tr><th>Assessment</th><td>%s (%d)</td></tr></table>",
+		html.EscapeString(report.Run.ID), html.EscapeString(string(report.Run.Status)), report.Version, report.DurationSeconds, html.EscapeString(report.Assessment.Label), report.Assessment.Score)
+	fmt.Fprint(w, "<h2>Run Metadata</h2><table><tr><th>Tags</th><td>")
+	fmt.Fprint(w, html.EscapeString(strings.Join(report.Run.Tags, ", ")))
+	fmt.Fprint(w, "</td></tr><tr><th>Trainees</th><td>")
+	fmt.Fprint(w, html.EscapeString(strings.Join(report.Run.Trainees, ", ")))
+	fmt.Fprint(w, "</td></tr><tr><th>Instructor Notes</th><td>")
+	fmt.Fprint(w, html.EscapeString(report.Run.InstructorNotes))
+	fmt.Fprint(w, "</td></tr></table>")
+	fmt.Fprint(w, "<h2>Assessment Criteria</h2><table><tr><th>Name</th><th>Value</th><th>Note</th></tr>")
+	for _, criterion := range report.Assessment.Criteria {
+		fmt.Fprintf(w, "<tr><td>%s</td><td>%d</td><td>%s</td></tr>", html.EscapeString(criterion.Name), criterion.Value, html.EscapeString(criterion.Note))
+	}
+	fmt.Fprint(w, "</table><h2>Annotations</h2><table><tr><th>Time</th><th>Actor</th><th>Note</th></tr>")
+	for _, annotation := range report.Annotations {
+		fmt.Fprintf(w, "<tr><td>%s</td><td>%s</td><td>%s</td></tr>", annotation.CreatedAt.Format(time.RFC3339), html.EscapeString(annotation.ActorID), html.EscapeString(annotation.Note))
+	}
+	fmt.Fprint(w, "</table><h2>Audit Log</h2><table><tr><th>Time</th><th>Actor</th><th>Action</th><th>Target</th></tr>")
+	for _, auditLog := range report.AuditLogs {
+		fmt.Fprintf(w, "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>", auditLog.OccurredAt.Format(time.RFC3339), html.EscapeString(auditLog.ActorID), html.EscapeString(auditLog.Action), html.EscapeString(auditLog.TargetID))
+	}
+	fmt.Fprint(w, "</table></body></html>")
+}
+
+func writeReportPDF(w http.ResponseWriter, report model.RunReport) {
+	lines := []string{
+		"ShipSystem Training Report",
+		"Run: " + report.Run.Name,
+		"Run ID: " + report.Run.ID,
+		"Status: " + string(report.Run.Status),
+		"Report Version: " + strconv.Itoa(report.Version),
+		"Assessment: " + report.Assessment.Label + " " + strconv.Itoa(report.Assessment.Score),
+		"Duration Seconds: " + strconv.FormatInt(report.DurationSeconds, 10),
+		"Tracks: " + strconv.Itoa(report.TrackCount),
+		"Annotations: " + strconv.Itoa(len(report.Annotations)),
+		"Audit Logs: " + strconv.Itoa(len(report.AuditLogs)),
+		"Safety: " + report.SafetyNotice,
+	}
+	pdf := simplePDF(lines)
+	w.Header().Set("Content-Type", "application/pdf")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="run-%s-report.pdf"`, report.Run.ID))
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(pdf)
+}
+
+func simplePDF(lines []string) []byte {
+	var content strings.Builder
+	content.WriteString("BT /F1 12 Tf 72 760 Td 16 TL\n")
+	for i, line := range lines {
+		if i > 0 {
+			content.WriteString("T*\n")
+		}
+		content.WriteString("(")
+		content.WriteString(pdfEscape(line))
+		content.WriteString(") Tj\n")
+	}
+	content.WriteString("ET\n")
+	stream := content.String()
+	objects := []string{
+		"<< /Type /Catalog /Pages 2 0 R >>",
+		"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+		"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+		"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+		fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len(stream), stream),
+	}
+	var out bytes.Buffer
+	out.WriteString("%PDF-1.4\n")
+	offsets := make([]int, len(objects)+1)
+	for i, object := range objects {
+		offsets[i+1] = out.Len()
+		fmt.Fprintf(&out, "%d 0 obj\n%s\nendobj\n", i+1, object)
+	}
+	xref := out.Len()
+	fmt.Fprintf(&out, "xref\n0 %d\n0000000000 65535 f \n", len(objects)+1)
+	for i := 1; i <= len(objects); i++ {
+		fmt.Fprintf(&out, "%010d 00000 n \n", offsets[i])
+	}
+	fmt.Fprintf(&out, "trailer << /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n", len(objects)+1, xref)
+	return out.Bytes()
+}
+
+func pdfEscape(value string) string {
+	value = strings.ReplaceAll(value, `\`, `\\`)
+	value = strings.ReplaceAll(value, "(", `\(`)
+	value = strings.ReplaceAll(value, ")", `\)`)
+	if len(value) > 100 {
+		value = value[:100]
+	}
+	return value
 }
 
 type errorPayload struct {
@@ -1014,6 +1275,10 @@ func writeManagerError(w http.ResponseWriter, err error) {
 	var validation sim.ValidationError
 	if errors.As(err, &validation) {
 		writeErrorDetails(w, http.StatusBadRequest, "validation_failed", "validation failed", validation.Details)
+		return
+	}
+	if strings.Contains(err.Error(), "scenario not found") {
+		writeError(w, http.StatusNotFound, "scenario_not_found", err)
 		return
 	}
 	if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "engine not found") {
@@ -1228,7 +1493,7 @@ func (s *Server) cors(next http.Handler) http.Handler {
 			return
 		}
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Ship-Sim-Token")
-		w.Header().Set("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,OPTIONS")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return

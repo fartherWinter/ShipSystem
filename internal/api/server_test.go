@@ -176,6 +176,210 @@ func TestReadinessAndScenariosAPI(t *testing.T) {
 	}
 }
 
+func TestTrainingProductWorkflowAPI(t *testing.T) {
+	server := NewServer(sim.NewManager(store.NewMemory(), slog.Default()), slog.Default())
+	ts := httptest.NewServer(server.Routes())
+	defer ts.Close()
+
+	scenario := sim.DefaultScenario()
+	scenario.ID = ""
+	scenario.Name = "stage-9-training-scenario"
+	scenario.Description = "Scenario uploaded through the product workflow."
+	scenarioBody, err := json.Marshal(scenario)
+	if err != nil {
+		t.Fatalf("marshal scenario: %v", err)
+	}
+	res, err := http.Post(ts.URL+"/api/scenarios", "application/json", bytes.NewReader(scenarioBody))
+	if err != nil {
+		t.Fatalf("create scenario request: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("expected scenario create 201, got %d", res.StatusCode)
+	}
+	var created model.ScenarioSummary
+	if err := json.NewDecoder(res.Body).Decode(&created); err != nil {
+		t.Fatalf("decode scenario summary: %v", err)
+	}
+	if !created.Enabled || created.ID == "" || created.Source != "database" {
+		t.Fatalf("unexpected created scenario: %+v", created)
+	}
+
+	copyBody := bytes.NewBufferString(`{"name":"stage-9-training-scenario-copy"}`)
+	res, err = http.Post(ts.URL+"/api/scenarios/"+created.ID+"/copy", "application/json", copyBody)
+	if err != nil {
+		t.Fatalf("copy scenario request: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("expected copy scenario 201, got %d", res.StatusCode)
+	}
+	var copied model.ScenarioSummary
+	if err := json.NewDecoder(res.Body).Decode(&copied); err != nil {
+		t.Fatalf("decode copied scenario: %v", err)
+	}
+	if copied.ID == created.ID || copied.Name != "stage-9-training-scenario-copy" {
+		t.Fatalf("unexpected copied scenario: %+v", copied)
+	}
+
+	res, err = http.Post(ts.URL+"/api/scenarios/"+copied.ID+"/disable", "application/json", nil)
+	if err != nil {
+		t.Fatalf("disable scenario request: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("expected disable 200, got %d", res.StatusCode)
+	}
+	var disabled model.ScenarioSummary
+	if err := json.NewDecoder(res.Body).Decode(&disabled); err != nil {
+		t.Fatalf("decode disabled scenario: %v", err)
+	}
+	if disabled.Enabled {
+		t.Fatalf("expected disabled scenario, got %+v", disabled)
+	}
+
+	res, err = http.Post(ts.URL+"/api/runs", "application/json", bytes.NewBufferString(`{"scenario_id":"`+copied.ID+`"}`))
+	if err != nil {
+		t.Fatalf("create disabled scenario run request: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected disabled scenario create run 400, got %d", res.StatusCode)
+	}
+
+	res, err = http.Post(ts.URL+"/api/scenarios/"+copied.ID+"/enable", "application/json", nil)
+	if err != nil {
+		t.Fatalf("enable scenario request: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("expected enable 200, got %d", res.StatusCode)
+	}
+
+	res, err = http.Post(ts.URL+"/api/runs", "application/json", bytes.NewBufferString(`{"scenario_id":"`+copied.ID+`"}`))
+	if err != nil {
+		t.Fatalf("create run from copied scenario request: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("expected run create 201, got %d", res.StatusCode)
+	}
+	var run model.Run
+	if err := json.NewDecoder(res.Body).Decode(&run); err != nil {
+		t.Fatalf("decode run: %v", err)
+	}
+
+	res, err = http.Post(ts.URL+"/api/runs/"+run.ID+"/start", "application/json", nil)
+	if err != nil {
+		t.Fatalf("start run request: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("expected start 200, got %d", res.StatusCode)
+	}
+	res, err = http.Post(ts.URL+"/api/runs/"+run.ID+"/actions", "application/json", bytes.NewBufferString(`{"type":"training_response","actor_id":"instructor-1"}`))
+	if err != nil {
+		t.Fatalf("action request: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusAccepted {
+		t.Fatalf("expected action 202, got %d", res.StatusCode)
+	}
+	var event model.SimEvent
+	if err := json.NewDecoder(res.Body).Decode(&event); err != nil {
+		t.Fatalf("decode action event: %v", err)
+	}
+
+	metadataBody := bytes.NewBufferString(`{"tags":["night","qualification"],"trainees":["student-a"],"instructor_notes":"Reviewed for abstract training only.","archived":false}`)
+	req, err := http.NewRequest(http.MethodPut, ts.URL+"/api/runs/"+run.ID+"/metadata", metadataBody)
+	if err != nil {
+		t.Fatalf("new metadata request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("metadata request: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("expected metadata 200, got %d", res.StatusCode)
+	}
+	var updatedRun model.Run
+	if err := json.NewDecoder(res.Body).Decode(&updatedRun); err != nil {
+		t.Fatalf("decode updated run: %v", err)
+	}
+	if len(updatedRun.Tags) != 2 || len(updatedRun.Trainees) != 1 || updatedRun.InstructorNotes == "" {
+		t.Fatalf("expected run metadata, got %+v", updatedRun)
+	}
+
+	annotationBody := bytes.NewBufferString(`{"event_id":"` + event.ID + `","note":"Instructor reviewed the abstract training response."}`)
+	res, err = http.Post(ts.URL+"/api/runs/"+run.ID+"/annotations", "application/json", annotationBody)
+	if err != nil {
+		t.Fatalf("annotation request: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("expected annotation 201, got %d", res.StatusCode)
+	}
+
+	res, err = http.Get(ts.URL + "/api/runs/" + run.ID + "/report")
+	if err != nil {
+		t.Fatalf("report request: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("expected report 200, got %d", res.StatusCode)
+	}
+	var report model.RunReport
+	if err := json.NewDecoder(res.Body).Decode(&report); err != nil {
+		t.Fatalf("decode report: %v", err)
+	}
+	if report.Version != 2 || len(report.Annotations) != 1 || len(report.AuditLogs) == 0 || report.Assessment.SafetyNotice == "" {
+		t.Fatalf("expected report v2 product fields, got %+v", report)
+	}
+	if strings.Contains(strings.ToLower(report.Assessment.Criteria[0].Note), "tactical recommendation") && !strings.Contains(strings.ToLower(report.Assessment.Criteria[0].Note), "not") {
+		t.Fatalf("assessment should not provide tactical guidance: %+v", report.Assessment)
+	}
+
+	res, err = http.Get(ts.URL + "/api/runs/" + run.ID + "/audit?limit=20")
+	if err != nil {
+		t.Fatalf("audit request: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("expected audit 200, got %d", res.StatusCode)
+	}
+	var auditLogs []model.AuditLog
+	if err := json.NewDecoder(res.Body).Decode(&auditLogs); err != nil {
+		t.Fatalf("decode audit logs: %v", err)
+	}
+	if !hasAuditAction(auditLogs, "run.created") || !hasAuditAction(auditLogs, "run.action_submitted") || !hasAuditAction(auditLogs, "report.exported") {
+		t.Fatalf("expected run/action/report audit logs, got %+v", auditLogs)
+	}
+
+	archiveBody := bytes.NewBufferString(`{"tags":["night"],"trainees":["student-a"],"instructor_notes":"Archived after review.","archived":true}`)
+	req, err = http.NewRequest(http.MethodPut, ts.URL+"/api/runs/"+run.ID+"/metadata", archiveBody)
+	if err != nil {
+		t.Fatalf("new archive request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("archive request: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("expected archive 200, got %d", res.StatusCode)
+	}
+	var archived model.Run
+	if err := json.NewDecoder(res.Body).Decode(&archived); err != nil {
+		t.Fatalf("decode archived run: %v", err)
+	}
+	if archived.ArchivedAt.IsZero() {
+		t.Fatalf("expected archived_at, got %+v", archived)
+	}
+}
+
 func TestTokenAuthProtectsAPIAndWebSocket(t *testing.T) {
 	cfg := config.Default()
 	cfg.AuthMode = config.AuthToken
@@ -404,7 +608,7 @@ func TestSnapshotsAndReportAPI(t *testing.T) {
 	if err := json.NewDecoder(res.Body).Decode(&report); err != nil {
 		t.Fatalf("decode report: %v", err)
 	}
-	if report.Version != 1 || report.ReplayMode != "snapshot" || report.SnapshotRange == nil || report.SnapshotCoverage == nil || report.TrackCount == 0 {
+	if report.Version != 2 || report.ReplayMode != "snapshot" || report.SnapshotRange == nil || report.SnapshotCoverage == nil || report.TrackCount == 0 {
 		t.Fatalf("unexpected snapshot report: %+v", report)
 	}
 	if report.SnapshotCoverage.Count != report.SnapshotRange.Count || report.SnapshotCoverage.From != report.SnapshotRange.From || report.SnapshotCoverage.To != report.SnapshotRange.To {
@@ -418,6 +622,9 @@ func TestSnapshotsAndReportAPI(t *testing.T) {
 	}
 	if !hasActorStat(report.EventAudit.ActorStats, "tester") {
 		t.Fatalf("expected actor stats to include tester, got %+v", report.EventAudit.ActorStats)
+	}
+	if report.Assessment.Score < 0 || report.Assessment.SafetyNotice == "" || len(report.AuditLogs) == 0 {
+		t.Fatalf("expected v2 assessment and audit logs, got assessment=%+v audit=%+v", report.Assessment, report.AuditLogs)
 	}
 
 	res, err = http.Get(ts.URL + "/api/runs/" + run.ID + "/report?format=csv")
@@ -435,8 +642,39 @@ func TestSnapshotsAndReportAPI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read csv report: %v", err)
 	}
-	if !strings.Contains(string(csvBody), "summary,run_id,"+run.ID) || !strings.Contains(string(csvBody), "summary,version,1") || !strings.Contains(string(csvBody), "actor,tester,1") {
+	if !strings.Contains(string(csvBody), "summary,run_id,"+run.ID) || !strings.Contains(string(csvBody), "summary,version,2") || !strings.Contains(string(csvBody), "actor,tester,1") || !strings.Contains(string(csvBody), "assessment,score,") {
 		t.Fatalf("expected csv report to include run id, got %q", string(csvBody))
+	}
+
+	res, err = http.Get(ts.URL + "/api/runs/" + run.ID + "/report?format=html")
+	if err != nil {
+		t.Fatalf("html report request: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("expected html report 200, got %d", res.StatusCode)
+	}
+	if contentType := res.Header.Get("Content-Type"); !strings.HasPrefix(contentType, "text/html") {
+		t.Fatalf("expected html report, got %q", contentType)
+	}
+
+	res, err = http.Get(ts.URL + "/api/runs/" + run.ID + "/report?format=pdf")
+	if err != nil {
+		t.Fatalf("pdf report request: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("expected pdf report 200, got %d", res.StatusCode)
+	}
+	if contentType := res.Header.Get("Content-Type"); !strings.HasPrefix(contentType, "application/pdf") {
+		t.Fatalf("expected pdf report, got %q", contentType)
+	}
+	pdfBody, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatalf("read pdf report: %v", err)
+	}
+	if !bytes.HasPrefix(pdfBody, []byte("%PDF-")) {
+		t.Fatalf("expected pdf bytes, got %q", string(pdfBody[:minInt(len(pdfBody), 16)]))
 	}
 
 	res, err = http.Get(ts.URL + "/metrics")
@@ -532,7 +770,7 @@ func TestLegacyReportWithoutSnapshots(t *testing.T) {
 	if err := json.NewDecoder(res.Body).Decode(&report); err != nil {
 		t.Fatalf("decode legacy report: %v", err)
 	}
-	if report.Version != 1 || report.ReplayMode != "legacy" || report.SnapshotRange != nil || report.SnapshotCoverage != nil {
+	if report.Version != 2 || report.ReplayMode != "legacy" || report.SnapshotRange != nil || report.SnapshotCoverage != nil || report.Assessment.SafetyNotice == "" {
 		t.Fatalf("unexpected legacy report: %+v", report)
 	}
 }
@@ -771,6 +1009,9 @@ func TestRequestLogsIncludeAuditFieldsWithoutSensitiveValues(t *testing.T) {
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("expected report 200, got %d", res.StatusCode)
+	}
+	if _, err := io.ReadAll(res.Body); err != nil {
+		t.Fatalf("read report body: %v", err)
 	}
 
 	output := logs.String()
@@ -1018,4 +1259,20 @@ func hasActorStat(stats []model.ActorStat, actorID string) bool {
 		}
 	}
 	return false
+}
+
+func hasAuditAction(logs []model.AuditLog, action string) bool {
+	for _, log := range logs {
+		if log.Action == action {
+			return true
+		}
+	}
+	return false
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

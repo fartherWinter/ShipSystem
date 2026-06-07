@@ -15,7 +15,7 @@ Safety boundary:
 - Go backend in `cmd/sim-server`
 - Simulation engine in `internal/sim`
 - REST/WebSocket API in `internal/api`
-- PostgreSQL/PostGIS migrations in `migrations/001_init.sql` and `migrations/002_snapshot_frames.sql`
+- PostgreSQL/PostGIS migrations in `migrations/001_init.sql`, `migrations/002_snapshot_frames.sql`, and `migrations/003_training_product.sql`
 - OpenAPI contract in `docs/openapi.json`
 - React/MapLibre frontend skeleton in `web`
 - Docker/Compose packaging for small cloud deployments
@@ -53,12 +53,13 @@ Apply the migrations in order before using PostgreSQL mode:
 ```powershell
 psql $env:DATABASE_URL -f migrations/001_init.sql
 psql $env:DATABASE_URL -f migrations/002_snapshot_frames.sql
+psql $env:DATABASE_URL -f migrations/003_training_product.sql
 ```
 
 PostgreSQL mode has a startup migration gate. The app requires
 `schema_migrations.name='ship_sim'` to be at the current version before HTTP
 startup. Empty databases are treated as version `0`; databases with only
-`001_init.sql` are version `1` and must apply `002_snapshot_frames.sql`.
+`001_init.sql` are version `1`, databases migrated through `002_snapshot_frames.sql` are version `2`, and both must apply `003_training_product.sql`.
 
 Production mode requires authentication:
 
@@ -121,7 +122,8 @@ error state if configured tiles cannot be loaded.
 The Compose file runs the app and PostGIS. The migrations are mounted into
 `/docker-entrypoint-initdb.d` and are applied when the database volume is first
 created. For an existing database, apply `migrations/001_init.sql` and then
-`migrations/002_snapshot_frames.sql` manually.
+`migrations/002_snapshot_frames.sql` and `migrations/003_training_product.sql`
+manually.
 
 Run the optional Postgres integration test against an isolated test database:
 
@@ -168,14 +170,30 @@ Build a training review report:
 Invoke-RestMethod -Uri "http://localhost:8080/api/runs/$($run.id)/report"
 Invoke-WebRequest -Uri "http://localhost:8080/api/runs/$($run.id)/report" -OutFile report.json
 Invoke-WebRequest -Uri "http://localhost:8080/api/runs/$($run.id)/report?format=csv" -OutFile report.csv
+Invoke-WebRequest -Uri "http://localhost:8080/api/runs/$($run.id)/report?format=html" -OutFile report.html
+Invoke-WebRequest -Uri "http://localhost:8080/api/runs/$($run.id)/report?format=pdf" -OutFile report.pdf
 ```
 
-Reports currently use `version: 1` and are intentionally limited to training
+Reports currently use `version: 2` and are intentionally limited to training
 summary plus audit data. They include duration, track totals, action counts,
-threat summary, final track states, event audit summary, snapshot coverage
+threat summary, final track states, event audit summary, event annotations,
+abstract training-record assessment, persisted audit logs, snapshot coverage
 (`from`, `to`, `count`, `average_interval_ms`), raw audit events, and the safety
-notice. They do not include scoring, tactical recommendations, real
-fire-control data, or device-command guidance.
+notice. Assessment is based on record completeness and replay coverage; it is
+not tactical advice, real fire-control data, or device-command guidance.
+
+Managed scenario and training record APIs:
+
+```powershell
+$scenario = Get-Content scenarios/demo.json -Raw
+$saved = Invoke-RestMethod -Method Post -Uri http://localhost:8080/api/scenarios -ContentType application/json -Body $scenario
+Invoke-RestMethod -Method Post -Uri "http://localhost:8080/api/scenarios/$($saved.id)/copy" -ContentType application/json -Body '{"name":"demo-copy"}'
+Invoke-RestMethod -Method Post -Uri "http://localhost:8080/api/scenarios/$($saved.id)/disable"
+Invoke-RestMethod -Method Post -Uri "http://localhost:8080/api/scenarios/$($saved.id)/enable"
+Invoke-RestMethod -Method Put -Uri "http://localhost:8080/api/runs/$($run.id)/metadata" -ContentType application/json -Body '{"tags":["demo"],"trainees":["student-a"],"instructor_notes":"Training review only.","archived":false}'
+Invoke-RestMethod -Method Post -Uri "http://localhost:8080/api/runs/$($run.id)/annotations" -ContentType application/json -Body '{"note":"Instructor review note."}'
+Invoke-RestMethod -Uri "http://localhost:8080/api/runs/$($run.id)/audit"
+```
 
 New runs persist full snapshot frames for replay. Runs created before the
 snapshot migration still return reports with `replay_mode: "legacy"`; the UI
@@ -214,14 +232,16 @@ npm run generate:types
 The OpenAPI source is `docs/openapi.json`. Frontend API types are generated into
 `web/src/generated/api-types.ts` and re-exported through `web/src/types.ts`.
 See `docs/api.md` for report, scenario, run, snapshot versioning and API error
-code policy.
+code policy. See `docs/training-product.md` for scenario CRUD, run metadata,
+annotations, assessment, report templates, audit logs, and the training-only
+boundary.
 
 ## Operations
 
 Apply PostgreSQL migrations in order: `001_init.sql` first, then
-`002_snapshot_frames.sql`. Existing runs from before `002_snapshot_frames.sql`
-are not backfilled with snapshots; they remain available through legacy replay
-mode.
+`002_snapshot_frames.sql`, then `003_training_product.sql`. Existing runs from
+before `002_snapshot_frames.sql` are not backfilled with snapshots; they remain
+available through legacy replay mode.
 
 Snapshot and audit retention is disabled by default:
 

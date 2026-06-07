@@ -146,6 +146,18 @@ func (m *Manager) CreateRunForOwner(ctx context.Context, ownerID, name string, s
 	if m.logger != nil {
 		m.logger.Info("run created", "run_id", run.ID, "owner_id", run.OwnerID, "scenario", run.Scenario.Name)
 	}
+	_ = m.recordAudit(ctx, model.AuditLog{
+		RunID:      run.ID,
+		ScenarioID: run.Scenario.ID,
+		ActorID:    ownerID,
+		Action:     "run.created",
+		TargetType: "run",
+		TargetID:   run.ID,
+		Payload: map[string]any{
+			"name":     run.Name,
+			"scenario": run.Scenario.Name,
+		},
+	})
 	return run, nil
 }
 
@@ -209,7 +221,11 @@ func (m *Manager) Start(ctx context.Context, id string) (model.Run, error) {
 	if m.logger != nil {
 		m.logger.Info("run started", "run_id", run.ID, "status", run.Status)
 	}
-	return run, m.store.SaveRun(ctx, run)
+	if err := m.store.SaveRun(ctx, run); err != nil {
+		return model.Run{}, err
+	}
+	_ = m.recordAudit(ctx, model.AuditLog{RunID: run.ID, ActorID: run.OwnerID, Action: "run.started", TargetType: "run", TargetID: run.ID})
+	return run, nil
 }
 
 func (m *Manager) Pause(ctx context.Context, id string) (model.Run, error) {
@@ -221,7 +237,11 @@ func (m *Manager) Pause(ctx context.Context, id string) (model.Run, error) {
 	if m.logger != nil {
 		m.logger.Info("run paused", "run_id", run.ID, "status", run.Status)
 	}
-	return run, m.store.SaveRun(ctx, run)
+	if err := m.store.SaveRun(ctx, run); err != nil {
+		return model.Run{}, err
+	}
+	_ = m.recordAudit(ctx, model.AuditLog{RunID: run.ID, ActorID: run.OwnerID, Action: "run.paused", TargetType: "run", TargetID: run.ID})
+	return run, nil
 }
 
 func (m *Manager) Stop(ctx context.Context, id string) (model.Run, error) {
@@ -233,7 +253,11 @@ func (m *Manager) Stop(ctx context.Context, id string) (model.Run, error) {
 	if m.logger != nil {
 		m.logger.Info("run stopped", "run_id", run.ID, "status", run.Status)
 	}
-	return run, m.store.SaveRun(ctx, run)
+	if err := m.store.SaveRun(ctx, run); err != nil {
+		return model.Run{}, err
+	}
+	_ = m.recordAudit(ctx, model.AuditLog{RunID: run.ID, ActorID: run.OwnerID, Action: "run.stopped", TargetType: "run", TargetID: run.ID})
+	return run, nil
 }
 
 func (m *Manager) Shutdown(ctx context.Context) error {
@@ -275,7 +299,121 @@ func (m *Manager) SubmitAction(ctx context.Context, id string, action model.Acti
 	if err := m.saveSnapshot(ctx, engine.Snapshot()); err != nil {
 		return model.SimEvent{}, err
 	}
+	run := engine.Run()
+	_ = m.recordAudit(ctx, model.AuditLog{
+		RunID:      run.ID,
+		ActorID:    action.ActorID,
+		Action:     "run.action_submitted",
+		TargetType: "event",
+		TargetID:   event.ID,
+		Payload: map[string]any{
+			"action":        action.Type,
+			"training_only": true,
+		},
+	})
 	return event, nil
+}
+
+func (m *Manager) UpdateRunMetadata(ctx context.Context, id string, metadata model.RunMetadata, actorID string) (model.Run, error) {
+	run, err := m.GetRun(ctx, id)
+	if err != nil {
+		return model.Run{}, err
+	}
+	run.Tags = normalizeStringList(metadata.Tags, 12)
+	run.Trainees = normalizeStringList(metadata.Trainees, 24)
+	run.InstructorNotes = strings.TrimSpace(metadata.InstructorNotes)
+	run.UpdatedAt = time.Now().UTC()
+	if metadata.Archived {
+		if run.ArchivedAt.IsZero() {
+			run.ArchivedAt = run.UpdatedAt
+		}
+	} else {
+		run.ArchivedAt = time.Time{}
+	}
+	if engine := m.engine(id); engine != nil {
+		engine.SetRunMetadata(run)
+	}
+	if err := m.store.SaveRun(ctx, run); err != nil {
+		return model.Run{}, err
+	}
+	action := "run.metadata_updated"
+	if metadata.Archived {
+		action = "run.archived"
+	}
+	_ = m.recordAudit(ctx, model.AuditLog{
+		RunID:      run.ID,
+		ActorID:    actorID,
+		Action:     action,
+		TargetType: "run",
+		TargetID:   run.ID,
+		Payload: map[string]any{
+			"tags":      run.Tags,
+			"trainees":  run.Trainees,
+			"archived":  !run.ArchivedAt.IsZero(),
+			"has_notes": run.InstructorNotes != "",
+		},
+	})
+	return run, nil
+}
+
+func (m *Manager) AddEventAnnotation(ctx context.Context, runID string, annotation model.EventAnnotation, actorID string) (model.EventAnnotation, error) {
+	if _, err := m.GetRun(ctx, runID); err != nil {
+		return model.EventAnnotation{}, err
+	}
+	annotation.RunID = runID
+	annotation.Note = strings.TrimSpace(annotation.Note)
+	if annotation.Note == "" {
+		return model.EventAnnotation{}, ValidationError{Details: []string{"annotation note is required"}}
+	}
+	if annotation.ActorID == "" {
+		annotation.ActorID = actorID
+	}
+	saved, err := m.store.SaveEventAnnotation(ctx, annotation)
+	if err != nil {
+		return model.EventAnnotation{}, err
+	}
+	_ = m.recordAudit(ctx, model.AuditLog{
+		RunID:      runID,
+		ActorID:    saved.ActorID,
+		Action:     "event.annotated",
+		TargetType: "event",
+		TargetID:   saved.EventID,
+		Payload: map[string]any{
+			"annotation_id": saved.ID,
+			"has_event_id":  saved.EventID != "",
+		},
+	})
+	return saved, nil
+}
+
+func (m *Manager) EventAnnotations(ctx context.Context, runID string) ([]model.EventAnnotation, error) {
+	if _, err := m.GetRun(ctx, runID); err != nil {
+		return nil, err
+	}
+	return m.store.ListEventAnnotations(ctx, runID)
+}
+
+func (m *Manager) AuditLogs(ctx context.Context, query model.AuditLogQuery) ([]model.AuditLog, error) {
+	if query.RunID != "" {
+		if _, err := m.GetRun(ctx, query.RunID); err != nil {
+			return nil, err
+		}
+	}
+	return m.store.ListAuditLogs(ctx, query)
+}
+
+func (m *Manager) RecordReportExport(ctx context.Context, runID, actorID, format string) {
+	_ = m.recordAudit(ctx, model.AuditLog{
+		RunID:      runID,
+		ActorID:    actorID,
+		Action:     "report.exported",
+		TargetType: "run",
+		TargetID:   runID,
+		Payload: map[string]any{
+			"format":        format,
+			"training_only": true,
+		},
+	})
 }
 
 func (m *Manager) Tracks(ctx context.Context, id string) ([]model.Track, error) {
@@ -445,8 +583,16 @@ func (m *Manager) Report(ctx context.Context, id string) (model.RunReport, error
 	if err != nil {
 		return model.RunReport{}, err
 	}
+	annotations, err := m.store.ListEventAnnotations(ctx, id)
+	if err != nil {
+		return model.RunReport{}, err
+	}
+	auditLogs, err := m.store.ListAuditLogs(ctx, model.AuditLogQuery{RunID: id, Limit: 200})
+	if err != nil {
+		return model.RunReport{}, err
+	}
 	report := model.RunReport{
-		Version:         1,
+		Version:         2,
 		Run:             run,
 		ReplayMode:      "legacy",
 		DurationSeconds: runDurationSeconds(run),
@@ -456,6 +602,8 @@ func (m *Manager) Report(ctx context.Context, id string) (model.RunReport, error
 		ThreatSummary:   threatSummary(frames, finalTracks),
 		FinalTracks:     trackStatusSummaries(finalTracks),
 		Events:          reverseEvents(events.Items),
+		Annotations:     annotations,
+		AuditLogs:       auditLogs,
 		SafetyNotice:    model.SafetyNotice,
 	}
 	if hasSnapshots {
@@ -463,6 +611,7 @@ func (m *Manager) Report(ctx context.Context, id string) (model.RunReport, error
 		report.SnapshotRange = &snapshotRange
 		report.SnapshotCoverage = snapshotCoverage(snapshotRange)
 	}
+	report.Assessment = trainingAssessment(report)
 	return report, nil
 }
 
@@ -471,6 +620,92 @@ func (m *Manager) reportFinalTracks(ctx context.Context, id string, frames []mod
 		return cloneTracks(frames[len(frames)-1].Tracks), nil
 	}
 	return m.Tracks(ctx, id)
+}
+
+func (m *Manager) recordAudit(ctx context.Context, log model.AuditLog) error {
+	if log.OccurredAt.IsZero() {
+		log.OccurredAt = time.Now().UTC()
+	}
+	return m.store.SaveAuditLog(ctx, log)
+}
+
+func trainingAssessment(report model.RunReport) model.TrainingAssessment {
+	criteria := []model.AssessmentCriterion{
+		{
+			Name:  "training_actions",
+			Value: boundedScore(report.EventAudit.EventCount, 6),
+			Note:  "Abstract count of submitted training actions; not a tactical recommendation.",
+		},
+		{
+			Name:  "replay_coverage",
+			Value: replayCoverageScore(report),
+			Note:  "Replay evidence coverage for after-action review.",
+		},
+		{
+			Name:  "instructor_context",
+			Value: instructorContextScore(report),
+			Note:  "Presence of tags, trainees, instructor notes, and event annotations.",
+		},
+	}
+	total := 0
+	for _, criterion := range criteria {
+		total += criterion.Value
+	}
+	score := total / len(criteria)
+	label := "needs_review"
+	switch {
+	case score >= 80:
+		label = "complete_training_record"
+	case score >= 50:
+		label = "partial_training_record"
+	}
+	return model.TrainingAssessment{
+		Score:        score,
+		Label:        label,
+		Criteria:     criteria,
+		SafetyNotice: model.SafetyNotice,
+	}
+}
+
+func replayCoverageScore(report model.RunReport) int {
+	if report.ReplayMode != "snapshot" || report.SnapshotCoverage == nil {
+		return 25
+	}
+	if report.SnapshotCoverage.Count >= 20 {
+		return 100
+	}
+	return boundedScore(report.SnapshotCoverage.Count, 20)
+}
+
+func instructorContextScore(report model.RunReport) int {
+	points := 0
+	if len(report.Run.Tags) > 0 {
+		points += 25
+	}
+	if len(report.Run.Trainees) > 0 {
+		points += 25
+	}
+	if strings.TrimSpace(report.Run.InstructorNotes) != "" {
+		points += 25
+	}
+	if len(report.Annotations) > 0 {
+		points += 25
+	}
+	return points
+}
+
+func boundedScore(value, target int) int {
+	if target <= 0 {
+		return 0
+	}
+	score := int(math.Round(float64(value) / float64(target) * 100))
+	if score < 0 {
+		return 0
+	}
+	if score > 100 {
+		return 100
+	}
+	return score
 }
 
 func runDurationSeconds(run model.Run) int64 {
@@ -633,6 +868,37 @@ func reverseEvents(events []model.SimEvent) []model.SimEvent {
 		out[i], out[j] = out[j], out[i]
 	}
 	return out
+}
+
+func normalizeStringList(items []string, maxItems int) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, minInt(len(items), maxItems))
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if len(item) > 80 {
+			item = item[:80]
+		}
+		key := strings.ToLower(item)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, item)
+		if len(out) == maxItems {
+			break
+		}
+	}
+	return out
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func (m *Manager) restoreStoredRun(run model.Run) model.Run {
@@ -926,6 +1192,17 @@ func (e *Engine) Run() model.Run {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.run
+}
+
+func (e *Engine) SetRunMetadata(run model.Run) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.run.Name = run.Name
+	e.run.Tags = append([]string(nil), run.Tags...)
+	e.run.Trainees = append([]string(nil), run.Trainees...)
+	e.run.InstructorNotes = run.InstructorNotes
+	e.run.ArchivedAt = run.ArchivedAt
+	e.run.UpdatedAt = run.UpdatedAt
 }
 
 func (e *Engine) Start(_ context.Context) model.Run {
