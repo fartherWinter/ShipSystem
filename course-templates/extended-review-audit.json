@@ -1,0 +1,106 @@
+{
+  "id": "extended-review-audit",
+  "name": "Extended Review Audit",
+  "description": "Longer training review package for replay coverage, annotations, audit log review, and export/archive practice.",
+  "training_only": true,
+  "scenario": {
+    "name": "extended-review-audit-scenario",
+    "description": "Simulated multi-contact scenario for longer audit-grade replay reviews.",
+    "version": 1,
+    "seed": 2026060802,
+    "tick_hz": 20,
+    "snapshot_hz": 10,
+    "assessment_profile": "extended_review",
+    "assessment_rules": {
+      "name": "extended_review_record",
+      "action_target": 10,
+      "replay_target": 60,
+      "action_weight": 40,
+      "replay_weight": 35,
+      "context_weight": 25
+    },
+    "initial_contacts": 8,
+    "ownship": {
+      "lon": 121.5,
+      "lat": 31.2,
+      "alt_m": 0
+    },
+    "allowed_actions": ["maneuver", "decoy", "training_response"],
+    "sensors": [
+      {
+        "id": "sim-sensor-extended-1",
+        "name": "Simulated Primary Sensor",
+        "kind": "simulated_sensor",
+        "position": {
+          "lon": 121.5,
+          "lat": 31.2,
+          "alt_m": 0
+        }
+      },
+      {
+        "id": "sim-sensor-extended-2",
+        "name": "Simulated Secondary Sensor",
+        "kind": "simulated_sensor",
+        "position": {
+          "lon": 121.62,
+          "lat": 31.28,
+          "alt_m": 0
+        }
+      }
+    ],
+    "zones": [
+      {
+        "id": "extended-review-area",
+        "name": "Extended Review Area",
+        "kind": "exercise_boundary",
+        "polygon": [
+          { "lon": 121.05, "lat": 30.85, "alt_m": 0 },
+          { "lon": 121.95, "lat": 30.85, "alt_m": 0 },
+          { "lon": 121.95, "lat": 31.65, "alt_m": 0 },
+          { "lon": 121.05, "lat": 31.65, "alt_m": 0 }
+        ]
+      },
+      {
+        "id": "review-focus-zone",
+        "name": "Review Focus Zone",
+        "kind": "annotation_area",
+        "polygon": [
+          { "lon": 121.35, "lat": 31.08, "alt_m": 0 },
+          { "lon": 121.72, "lat": 31.08, "alt_m": 0 },
+          { "lon": 121.72, "lat": 31.38, "alt_m": 0 },
+          { "lon": 121.35, "lat": 31.38, "alt_m": 0 }
+        ]
+      }
+    ]
+  },
+  "expected_metadata": {
+    "tags": ["extended-review", "audit"],
+    "trainees_required": true,
+    "instructor_notes_required": true,
+    "annotations_required": true,
+    "archive_after_export": true
+  },
+  "review_checklist": [
+    {
+      "id": "actions-recorded",
+      "label": "Multiple abstract training actions were recorded.",
+      "evidence": "Report event_audit.action_stats contains at least two action types."
+    },
+    {
+      "id": "coverage-reviewed",
+      "label": "Replay coverage and maximum loaded-window gap were reviewed.",
+      "evidence": "Console replay quality summary was checked and report snapshot_coverage is present."
+    },
+    {
+      "id": "event-annotations",
+      "label": "Instructor annotations were added for review-relevant events.",
+      "evidence": "Report annotations contains entries linked to event ids or the run."
+    },
+    {
+      "id": "archive-exported",
+      "label": "Completed run archive was exported before retention pruning.",
+      "evidence": "Archive manifest records report exports, events, audit logs, snapshots, and track points."
+    }
+  ],
+  "safety_notice": "Training/simulation only. This template does not provide real fire-control, weapon-control, electronic-warfare, radar-control, or tactical engagement guidance."
+}

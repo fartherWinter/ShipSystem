@@ -195,22 +195,76 @@ textarea {
 
 .runHistory h2,
 .events h2,
+.coursePanel h2,
 .selectorPanel h2,
 .authPanel h2,
 .metadataPanel h2,
 .replayPanel h2,
-.reportPanel h2 {
+.reportPanel h2,
+.capacityPanel h2,
+.scenarioEditor h3 {
   font-size: 15px;
   margin: 0;
 }
 
 .authPanel,
+.coursePanel,
 .selectorPanel,
 .metadataPanel,
 .replayPanel,
-.reportPanel {
+.reportPanel,
+.capacityPanel {
   display: grid;
   gap: 8px;
+}
+
+.accessSummary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 750;
+  color: #526274;
+}
+
+.accessSummary span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.accessSummary b {
+  border-radius: 999px;
+  background: #edf8f1;
+  color: #24613b;
+  padding: 3px 8px;
+}
+
+.permissionList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.permissionList span {
+  border: 1px solid #d6dee8;
+  background: #ffffff;
+  color: #526274;
+  border-radius: 999px;
+  padding: 4px 7px;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.permissionList span[data-enabled="true"] {
+  border-color: #bfd2c4;
+  background: #edf8f1;
+  color: #24613b;
+}
+
+.permissionList span[data-enabled="false"] {
+  opacity: 0.58;
 }
 
 .scenarioMeta {
@@ -241,6 +295,39 @@ textarea {
   color: #a13225;
 }
 
+.courseTemplateDetail {
+  display: grid;
+  gap: 5px;
+}
+
+.courseTemplateDetail span {
+  border: 1px solid #d9e1e9;
+  background: #ffffff;
+  border-radius: 6px;
+  color: #526274;
+  padding: 7px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.statusLine {
+  border-radius: 6px;
+  padding: 7px 8px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.statusLine[data-state="ok"] {
+  background: #edf8f1;
+  color: #24613b;
+}
+
+.statusLine[data-state="error"] {
+  background: #fff1ef;
+  color: #a13225;
+}
+
 .scenarioActions {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
@@ -251,6 +338,322 @@ textarea {
   min-width: 0;
   min-height: 34px;
   padding: 0 9px;
+}
+
+.scenarioEditor {
+  display: grid;
+  gap: 7px;
+  border: 1px solid #d9e1e9;
+  background: #ffffff;
+  border-radius: 8px;
+  padding: 9px;
+}
+
+.editorButtons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.editorButtons button {
+  min-height: 30px;
+  padding: 0 9px;
+  font-size: 12px;
+}
+
+.scenarioJson {
+  min-height: 118px;
+  font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.scenarioMapTools {
+  display: grid;
+  gap: 6px;
+}
+
+.scenarioMapModes {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.scenarioGeometryEditor {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr) minmax(82px, 0.7fr);
+  gap: 6px;
+}
+
+.scenarioGeometryEditor select,
+.scenarioGeometryEditor button {
+  min-width: 0;
+  min-height: 30px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.scenarioTemplates {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.scenarioMapModes button,
+.scenarioGeometryEditor button,
+.scenarioTemplates button,
+.scenarioZoneDraft button {
+  min-width: 0;
+  min-height: 30px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.scenarioMapModes button,
+.scenarioZoneDraft button {
+  text-transform: capitalize;
+}
+
+.scenarioMapModes button[data-active="true"] {
+  border-color: #245a94;
+  background: #eef5ff;
+  color: #245a94;
+}
+
+.assessmentRuleForm {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) repeat(2, minmax(52px, 0.7fr));
+  gap: 6px;
+}
+
+.assessmentRuleForm input {
+  min-width: 0;
+  min-height: 30px;
+  padding: 0 7px;
+  font-size: 12px;
+}
+
+.assessmentRuleForm span {
+  min-height: 30px;
+  border: 1px solid #d9e1e9;
+  background: #f8fafc;
+  border-radius: 6px;
+  color: #526274;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.assessmentRuleForm span[data-state="ok"] {
+  border-color: #b7e4c7;
+  background: #edf8f1;
+  color: #24613b;
+}
+
+.assessmentRuleForm span[data-state="warning"] {
+  border-color: #ffd8a8;
+  background: #fff7ed;
+  color: #8a5200;
+}
+
+.assessmentRuleForm button {
+  min-width: 0;
+  min-height: 30px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.scenarioZoneDraft {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px 34px 34px;
+  gap: 6px;
+  align-items: center;
+}
+
+.scenarioZoneDraft span {
+  min-height: 30px;
+  border: 1px solid #d9e1e9;
+  background: #f8fafc;
+  border-radius: 6px;
+  color: #526274;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.scenarioEditorMeta {
+  display: grid;
+  gap: 5px;
+  color: #65758a;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.scenarioEditorMeta b {
+  border-radius: 6px;
+  padding: 6px 7px;
+  overflow-wrap: anywhere;
+}
+
+.scenarioEditorMeta b[data-state="ok"] {
+  background: #edf8f1;
+  color: #24613b;
+}
+
+.scenarioEditorMeta b[data-state="error"] {
+  background: #fff1ef;
+  color: #a13225;
+}
+
+.scenarioEditorMeta span[data-state="ok"] {
+  color: #24613b;
+}
+
+.scenarioEditorMeta span[data-state="warning"] {
+  color: #7a5200;
+}
+
+.capacityLimits {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 5px;
+}
+
+.capacityLimits span {
+  border: 1px solid #d9e1e9;
+  background: #ffffff;
+  border-radius: 6px;
+  color: #526274;
+  padding: 7px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.capacityLatency {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.capacityLatency span {
+  border: 1px solid #d9e1e9;
+  background: #ffffff;
+  border-radius: 6px;
+  color: #526274;
+  padding: 7px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.capacityDbPlan {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.capacityDbPlan span,
+.capacityDbPlan strong {
+  border: 1px solid #d9e1e9;
+  background: #ffffff;
+  border-radius: 6px;
+  color: #526274;
+  padding: 7px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.capacityDbPlan strong[data-state="ok"] {
+  border-color: #bfd2c4;
+  background: #edf8f1;
+  color: #24613b;
+}
+
+.capacityDbPlan strong[data-state="warning"] {
+  border-color: #e0c58b;
+  background: #fff8e5;
+  color: #7a5200;
+}
+
+.capacityTrend {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 5px;
+}
+
+.capacityTrend span,
+.capacityTrend strong {
+  border: 1px solid #d9e1e9;
+  background: #ffffff;
+  border-radius: 6px;
+  color: #526274;
+  padding: 7px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.capacityTrend strong[data-state="ok"] {
+  border-color: #bfd2c4;
+  background: #edf8f1;
+  color: #24613b;
+}
+
+.capacityTrend strong[data-state="warning"] {
+  border-color: #e0c58b;
+  background: #fff8e5;
+  color: #7a5200;
+}
+
+.capacityTrend strong[data-state="error"] {
+  border-color: #efb5ad;
+  background: #fff1ef;
+  color: #a13225;
+}
+
+.capacityRunList {
+  display: grid;
+  gap: 5px;
+}
+
+.capacityRunList div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) repeat(4, 44px) 50px;
+  gap: 6px;
+  align-items: center;
+  border: 1px solid #d9e1e9;
+  background: #ffffff;
+  border-radius: 6px;
+  padding: 7px 8px;
+  font-size: 12px;
+}
+
+.capacityRunList span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #526274;
+  font-weight: 700;
+}
+
+.capacityRunList b,
+.capacityRunList strong {
+  text-align: right;
+  color: #102033;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .metadataPanel textarea,
@@ -330,6 +733,43 @@ textarea {
   accent-color: #2d6a4f;
 }
 
+.replayTimeline .replayInsights {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.replayInsights span {
+  border: 1px solid #d9e1e9;
+  background: #f8fafc;
+  border-radius: 999px;
+  color: #526274;
+  padding: 4px 7px;
+  font-size: 11px;
+  font-weight: 750;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.replayInsights span[data-state="ok"] {
+  border-color: #bfd2c4;
+  background: #edf8f1;
+  color: #24613b;
+}
+
+.replayInsights span[data-state="warning"] {
+  border-color: #e0c58b;
+  background: #fff8e5;
+  color: #7a5200;
+}
+
+.replayInsights span[data-state="empty"] {
+  border-color: #d9e1e9;
+  background: #ffffff;
+  color: #65758a;
+}
+
 .replayStatus {
   margin: 0;
   border: 1px solid #c7d7ec;
@@ -404,6 +844,55 @@ textarea {
   font-weight: 700;
 }
 
+.replayReviewActions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.replayReviewActions button {
+  min-width: 0;
+  min-height: 34px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.replayAnchorStatus {
+  margin: 0;
+  border: 1px solid #c7d7ec;
+  background: #eef5ff;
+  color: #245a94;
+  border-radius: 6px;
+  padding: 7px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.replayBookmarkList {
+  display: grid;
+  gap: 5px;
+}
+
+.replayBookmarkList div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px;
+  gap: 5px;
+}
+
+.replayBookmarkList button {
+  min-width: 0;
+  min-height: 32px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.replayBookmarkList button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .eventMarkers {
   display: grid;
   grid-template-columns: repeat(16, minmax(0, 1fr));
@@ -419,6 +908,16 @@ textarea {
   border-radius: 999px;
   border-color: #d1a74c;
   background: #fff1bf;
+}
+
+.eventMarkers button[data-severity="warning"] {
+  border-color: #b7791f;
+  background: #fbd38d;
+}
+
+.eventMarkers button[data-severity="error"] {
+  border-color: #b42318;
+  background: #fecaca;
 }
 
 .reportGrid {
@@ -839,7 +1338,8 @@ textarea {
   }
 
   .reportFilters,
-  .auditSummary {
+  .auditSummary,
+  .replayTimeline .replayInsights {
     grid-template-columns: 1fr;
   }
 

@@ -1,14 +1,18 @@
 import type {
   AuditLog,
+  CapacityTrendSample,
+  CourseTemplate,
   CreateRunRequest,
   EventAnnotation,
   EventAnnotationInput,
   EventPage,
+  MetricsResponse,
   Run,
   RunMetadata,
   RunReport,
   Scenario,
   ScenarioSummary,
+  SessionResponse,
   SimEvent,
   SnapshotFrame,
   Track,
@@ -104,8 +108,36 @@ export function listRuns(limit = 20): Promise<Run[]> {
   return apiFetch<Run[]>(`/api/runs?limit=${limit}`);
 }
 
+export function getSession(): Promise<SessionResponse> {
+  return apiFetch<SessionResponse>("/api/session");
+}
+
+export function listCourseTemplates(): Promise<CourseTemplate[]> {
+  return apiFetch<CourseTemplate[]>("/api/course-templates");
+}
+
+export function getCourseTemplate(id: string): Promise<CourseTemplate> {
+  return apiFetch<CourseTemplate>(`/api/course-templates/${encodeURIComponent(id)}`);
+}
+
+export function createCourseTemplate(template: CourseTemplate): Promise<CourseTemplate> {
+  return apiFetch<CourseTemplate>("/api/course-templates", jsonInit("POST", template));
+}
+
+export function updateCourseTemplate(id: string, template: CourseTemplate): Promise<CourseTemplate> {
+  return apiFetch<CourseTemplate>(`/api/course-templates/${encodeURIComponent(id)}`, jsonInit("PUT", template));
+}
+
+export function createScenarioFromCourseTemplate(id: string): Promise<ScenarioSummary> {
+  return apiFetch<ScenarioSummary>(`/api/course-templates/${encodeURIComponent(id)}/scenario`, { method: "POST" });
+}
+
 export type CreateRunInput = CreateRunRequest;
 export type ReportExportFormat = "json" | "csv" | "html" | "pdf";
+
+export function getRun(runID: string): Promise<Run> {
+  return apiFetch<Run>(`/api/runs/${runID}`);
+}
 
 export function createRun(input: CreateRunRequest = {}): Promise<Run> {
   return apiFetch<Run>("/api/runs", jsonInit("POST", input));
@@ -201,6 +233,14 @@ export function getNearestSnapshot(runID: string, at: string): Promise<SnapshotF
 
 export function getRunReport(runID: string): Promise<RunReport> {
   return apiFetch<RunReport>(`/api/runs/${runID}/report`);
+}
+
+export function getMetrics(): Promise<MetricsResponse> {
+  return apiFetch<MetricsResponse>("/metrics");
+}
+
+export function getMetricsHistory(limit = 48): Promise<CapacityTrendSample[]> {
+  return apiFetch<CapacityTrendSample[]>(`/metrics/history?limit=${limit}`);
 }
 
 export type WebSocketTicket = {

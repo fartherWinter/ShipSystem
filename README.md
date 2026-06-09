@@ -15,10 +15,21 @@ Safety boundary:
 - Go backend in `cmd/sim-server`
 - Simulation engine in `internal/sim`
 - REST/WebSocket API in `internal/api`
-- PostgreSQL/PostGIS migrations in `migrations/001_init.sql`, `migrations/002_snapshot_frames.sql`, and `migrations/003_training_product.sql`
+- PostgreSQL/PostGIS migrations in `migrations/001_init.sql` through `migrations/005_metrics_history.sql`
 - OpenAPI contract in `docs/openapi.json`
-- React/MapLibre frontend skeleton in `web`
+- React/MapLibre training console in `web`
 - Docker/Compose packaging for small cloud deployments
+
+## Current Capabilities
+
+- Scenario workflow: built-in/file scenarios, managed database scenarios, JSON upload/copy/update, map-assisted sensor/zone authoring, reusable visual templates, assessment-rule form editing, enable/disable controls, client/server validation, version metadata, optional assessment profiles, and configurable record-completeness rules.
+- Run workflow: create, start, pause, stop, live WebSocket snapshots, snapshot replay, event audit, track history, training metadata, annotations, and archive state.
+- Training actions: abstract `maneuver`, `decoy`, and `training_response` actions with training-only adjudication and persisted audit records.
+- Review workflow: replay window navigation, event jump-to-nearest-frame, replay anchors, browser-local review bookmarks, replay quality hints, final track summaries, configurable abstract training-record assessment, and JSON/CSV/HTML/PDF report exports.
+- Operations workflow: memory or PostgreSQL/PostGIS storage, migration gate, retention preview/prune, run archive export, role-aware proxy auth with console access summary, capacity pressure metrics with per-run detail, health/readiness endpoints, JSON and Prometheus metrics, Docker/Compose packaging, and documented release checks.
+- Course workflow: file and managed course templates pair validated scenarios with expected metadata and report review checklists, then create managed scenarios through the console or API.
+
+See `docs/glossary.md` for product terminology, `docs/course-templates.md` for reusable exercise packages, `docs/proxy-identity-runbook.md` for proxy role deployment, and `docs/optimization-roadmap.md` for the product polish and improvement backlog.
 
 ## Run Backend
 
@@ -32,6 +43,7 @@ Useful local configuration:
 
 ```powershell
 $env:SHIP_SIM_SCENARIO_DIR="scenarios"
+$env:SHIP_SIM_COURSE_TEMPLATE_DIR="course-templates"
 $env:SHIP_SIM_REQUEST_BODY_LIMIT="1048576"
 ```
 
@@ -54,12 +66,18 @@ Apply the migrations in order before using PostgreSQL mode:
 psql $env:DATABASE_URL -f migrations/001_init.sql
 psql $env:DATABASE_URL -f migrations/002_snapshot_frames.sql
 psql $env:DATABASE_URL -f migrations/003_training_product.sql
+psql $env:DATABASE_URL -f migrations/004_course_templates.sql
+psql $env:DATABASE_URL -f migrations/005_metrics_history.sql
 ```
 
 PostgreSQL mode has a startup migration gate. The app requires
 `schema_migrations.name='ship_sim'` to be at the current version before HTTP
 startup. Empty databases are treated as version `0`; databases with only
-`001_init.sql` are version `1`, databases migrated through `002_snapshot_frames.sql` are version `2`, and both must apply `003_training_product.sql`.
+`001_init.sql` are version `1`, databases migrated through
+`002_snapshot_frames.sql` are version `2`, and databases migrated through
+`003_training_product.sql` are version `3`, and `004_course_templates.sql`
+is version `4`. Apply `005_metrics_history.sql`
+to reach the current version.
 
 Production mode requires authentication:
 
@@ -72,11 +90,19 @@ $env:SHIP_SIM_AUTH_TOKEN="replace-with-a-secret"
 Token auth is intended for demo or simple single-user deployments. It is not a
 multi-user production identity system. `SHIP_SIM_AUTH_MODE=proxy` is supported
 for OIDC/auth-proxy deployments; set `SHIP_SIM_AUTH_USER_HEADER` to the trusted
-user header from the proxy. The reverse proxy must remove any incoming copy of
-that header before setting it, and the application must not be exposed directly
-to the public internet in proxy-auth mode. When authentication is enabled, run
-listing and run-scoped APIs are limited to the authenticated token user or proxy
-user.
+user header from the proxy and optionally `SHIP_SIM_AUTH_ROLE_HEADER` to
+`viewer`, `operator`, `instructor`, or `admin`. If the proxy cannot send a role
+header, set `SHIP_SIM_AUTH_ROLE_MAP` with comma-separated `user=role` entries
+and optionally `SHIP_SIM_AUTH_DEFAULT_ROLE` for unmapped authenticated users.
+The reverse proxy must remove any incoming copy of those headers before setting
+them, and the application must not be exposed directly to the public internet in
+proxy-auth mode. When authentication is enabled, run listing and run-scoped APIs
+are limited to the authenticated token user or proxy user.
+
+`GET /api/session` returns the current auth mode, authenticated user, role, and
+role source plus descriptive permission flags. The React console uses it to show
+the active Access summary; backend authorization remains the source of truth for
+every mutation.
 
 Long-lived credentials are not accepted through the `access_token` query
 parameter. Browser report export uses authenticated `fetch` requests and Blob
@@ -122,7 +148,8 @@ error state if configured tiles cannot be loaded.
 The Compose file runs the app and PostGIS. The migrations are mounted into
 `/docker-entrypoint-initdb.d` and are applied when the database volume is first
 created. For an existing database, apply `migrations/001_init.sql` and then
-`migrations/002_snapshot_frames.sql` and `migrations/003_training_product.sql`
+`migrations/002_snapshot_frames.sql`, `migrations/003_training_product.sql`,
+`migrations/004_course_templates.sql`, and `migrations/005_metrics_history.sql`
 manually.
 
 Run the optional Postgres integration test against an isolated test database:
@@ -177,6 +204,25 @@ Invoke-WebRequest -Uri "http://localhost:8080/api/runs/$($run.id)/report?format=
 Invoke-WebRequest -Uri "http://localhost:8080/api/runs/$($run.id)/report?format=pdf" -OutFile report.pdf
 ```
 
+Export a completed run archive before retention pruning or cold-storage handoff:
+
+```powershell
+.\scripts\export-run-archive.ps1 -RunID $run.id
+.\scripts\export-run-archive.ps1 -RunID $run.id -Compress
+```
+
+Compressed archives can be uploaded through a pre-signed object-store URL:
+
+```powershell
+.\scripts\export-run-archive.ps1 -RunID $run.id -Compress -UploadUrl $env:SHIP_SIM_ARCHIVE_UPLOAD_URL
+```
+
+Restore replay evidence from an archive into a PostgreSQL/PostGIS store:
+
+```powershell
+go run ./cmd/archive-restore -archive outputs/run-$($run.id)-archive.zip -database-url $env:DATABASE_URL
+```
+
 Reports currently use `version: 2` and are intentionally limited to training
 summary plus audit data. They include duration, track totals, action counts,
 threat summary, final track states, event audit summary, event annotations,
@@ -198,10 +244,32 @@ Invoke-RestMethod -Method Post -Uri "http://localhost:8080/api/runs/$($run.id)/a
 Invoke-RestMethod -Uri "http://localhost:8080/api/runs/$($run.id)/audit"
 ```
 
+Reusable course templates are loaded from `course-templates/` and can also be
+stored as managed database templates. The console Course panel can create a
+managed scenario from the selected template. API usage:
+
+```powershell
+Invoke-RestMethod -Uri http://localhost:8080/api/course-templates
+Invoke-RestMethod -Method Post -Uri http://localhost:8080/api/course-templates/quick-review-baseline/scenario
+```
+
+Template scenarios, expected metadata, and review checklists remain
+training-only setup and audit aids; they are not tactical recommendations.
+
 New runs persist full snapshot frames for replay. Runs created before the
 snapshot migration still return reports with `replay_mode: "legacy"`; the UI
 keeps showing historical track lines and events, but exact state replay is not
 available for those older runs.
+
+Replay anchors can be copied from the console and opened later with:
+
+```text
+http://localhost:5173/?run=<run-id>&at=<RFC3339-time>
+```
+
+The console loads the run and jumps to the nearest persisted replay frame.
+Browser-local replay bookmarks are review conveniences; use annotations or
+instructor notes for evidence that must be preserved in reports.
 
 Readiness and scenarios:
 
@@ -218,10 +286,13 @@ Invoke-RestMethod -Uri http://localhost:8080/metrics
 Invoke-WebRequest -Uri http://localhost:8080/metrics/prometheus
 ```
 
-The metrics payload includes active/listed run counts, WebSocket connection
-count, total snapshot frame count, `snapshot_frames_by_run`, snapshot write
-count, snapshot write failures, HTTP request counters/latency, engine counts,
-DB readiness, and snapshot write last/average/max duration in milliseconds.
+The metrics payload includes sample time, active/listed run counts, WebSocket
+connection count, total snapshot/event/track-point/contact counts, per-run
+count maps, capacity pressure for snapshots/events/track points, configured
+retention limits, snapshot write count/failures/latency, HTTP request
+counters/latency, engine counts, DB readiness, and backing-store table/index/
+total bytes where available. The console Capacity panel keeps a rolling trend
+window for growth, write latency, DB size, and archive-watch guidance.
 Prometheus format is available at `/metrics/prometheus`. See
 `docs/observability.md` for probe authentication and log field guidance.
 
@@ -242,7 +313,8 @@ boundary.
 ## Operations
 
 Apply PostgreSQL migrations in order: `001_init.sql` first, then
-`002_snapshot_frames.sql`, then `003_training_product.sql`. Existing runs from
+`002_snapshot_frames.sql`, `003_training_product.sql`,
+`004_course_templates.sql`, and `005_metrics_history.sql`. Existing runs from
 before `002_snapshot_frames.sql` are not backfilled with snapshots; they remain
 available through legacy replay mode.
 

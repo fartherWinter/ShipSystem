@@ -37,7 +37,9 @@ func TestMigrationStatusRequiresCurrentVersion(t *testing.T) {
 		{name: "empty database", current: 0, wantErr: true},
 		{name: "v1 database", current: 1, wantErr: true},
 		{name: "v2 database", current: 2, wantErr: true},
-		{name: "v3 database", current: CurrentMigrationVersion, wantErr: false},
+		{name: "v3 database", current: 3, wantErr: true},
+		{name: "v4 database", current: 4, wantErr: true},
+		{name: "current database", current: CurrentMigrationVersion, wantErr: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -168,6 +170,44 @@ func testStoreContract(t *testing.T, st Store) {
 	if !enabled.Enabled {
 		t.Fatalf("expected enabled scenario, got %+v", enabled)
 	}
+	courseTemplate, err := st.SaveCourseTemplate(ctx, model.CourseTemplate{
+		ID:           "store-course-" + runID[:8],
+		Name:         "Store Course",
+		Description:  "Store contract course template.",
+		TrainingOnly: true,
+		Scenario:     run.Scenario,
+		ExpectedMetadata: map[string]any{
+			"tags":              []any{"store-contract"},
+			"trainees_required": true,
+		},
+		ReviewChecklist: []model.CourseChecklistItem{
+			{ID: "record", Label: "Training record reviewed.", Evidence: "Report fields are complete."},
+		},
+		SafetyNotice: model.SafetyNotice,
+		Source:       "database",
+		Enabled:      true,
+		CreatedBy:    "tester",
+	})
+	if err != nil {
+		t.Fatalf("save course template: %v", err)
+	}
+	if courseTemplate.ID == "" || courseTemplate.Source != "database" || !courseTemplate.Enabled {
+		t.Fatalf("unexpected course template: %+v", courseTemplate)
+	}
+	gotTemplate, err := st.GetCourseTemplate(ctx, courseTemplate.ID)
+	if err != nil {
+		t.Fatalf("get course template: %v", err)
+	}
+	if gotTemplate.Name != courseTemplate.Name || len(gotTemplate.ReviewChecklist) != 1 || gotTemplate.Scenario.Name != run.Scenario.Name {
+		t.Fatalf("unexpected course template detail: %+v", gotTemplate)
+	}
+	templates, err := st.ListCourseTemplates(ctx)
+	if err != nil {
+		t.Fatalf("list course templates: %v", err)
+	}
+	if len(templates) == 0 {
+		t.Fatal("expected listed course template")
+	}
 	runs, err := st.ListRuns(ctx, 10)
 	if err != nil {
 		t.Fatalf("list runs: %v", err)
@@ -295,6 +335,47 @@ func testStoreContract(t *testing.T, st Store) {
 	if len(points) != 1 {
 		t.Fatalf("expected one track point, got %d", len(points))
 	}
+	counts, err := st.RunDataCounts(ctx, runID)
+	if err != nil {
+		t.Fatalf("run data counts: %v", err)
+	}
+	if counts.Events != 1 || counts.TrackPoints != 1 || counts.Contacts != 1 || counts.Snapshots != 1 {
+		t.Fatalf("unexpected initial run counts: %+v", counts)
+	}
+	dataSize, err := st.DataSize(ctx)
+	if err != nil {
+		t.Fatalf("store data size: %v", err)
+	}
+	if dataSize.Store == "" || dataSize.TableBytes < 0 || dataSize.IndexBytes < 0 || dataSize.TotalBytes < 0 {
+		t.Fatalf("unexpected store data size: %+v", dataSize)
+	}
+	for i := 0; i < 3; i++ {
+		if err := st.SaveMetricsHistorySample(ctx, model.MetricsHistorySample{
+			SampledAt:                  now.Add(time.Duration(i) * time.Minute),
+			SnapshotFrames:             10 + i,
+			EventCount:                 2 + i,
+			TrackPointCount:            20 + i,
+			ContactCount:               30 + i,
+			SnapshotCapacityPressure:   0.1,
+			EventCapacityPressure:      0.2,
+			TrackPointCapacityPressure: 0.3,
+			SnapshotWriteAvgMS:         4,
+			SnapshotWriteMaxMS:         8,
+			SnapshotWriteFailures:      int64(i),
+			DBTableBytes:               1000,
+			DBIndexBytes:               200,
+			DBTotalBytes:               1200,
+		}); err != nil {
+			t.Fatalf("save metrics history sample: %v", err)
+		}
+	}
+	history, err := st.ListMetricsHistorySamples(ctx, 2)
+	if err != nil {
+		t.Fatalf("list metrics history: %v", err)
+	}
+	if len(history) != 2 || history[0].SnapshotFrames != 11 || history[1].SnapshotFrames != 12 || history[1].SnapshotWriteFailures != 2 {
+		t.Fatalf("unexpected metrics history samples: %+v", history)
+	}
 
 	for i := 0; i < 2; i++ {
 		occurredAt := now.Add(time.Duration(i+1) * time.Millisecond)
@@ -319,6 +400,13 @@ func testStoreContract(t *testing.T, st Store) {
 		if err := st.SaveSnapshot(ctx, snapshot); err != nil {
 			t.Fatalf("save capacity snapshot: %v", err)
 		}
+	}
+	counts, err = st.RunDataCounts(ctx, runID)
+	if err != nil {
+		t.Fatalf("run data counts after capacity data: %v", err)
+	}
+	if counts.Events != 3 || counts.TrackPoints != 3 || counts.Contacts != 3 || counts.Snapshots != 3 {
+		t.Fatalf("unexpected capacity run counts: %+v", counts)
 	}
 	capacityPreview, err := st.PreviewPrune(ctx, model.RetentionPolicy{
 		MaxTrackPointsPerRun: 1,

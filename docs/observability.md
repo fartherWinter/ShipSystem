@@ -25,6 +25,8 @@ GET /metrics/prometheus
 
 Both metrics endpoints follow the app authentication mode. With `SHIP_SIM_AUTH_MODE=token`, scrape with an `Authorization: Bearer ...` header. With proxy auth, scrape through the trusted authenticated proxy. With auth off, local demo metrics are unauthenticated.
 
+The JSON metrics payload also includes `sampled_at`, `snapshot_frames_by_run`, `event_count_by_run`, `track_point_count_by_run`, `contact_count_by_run`, per-run capacity pressure for snapshots/events/track points, configured per-run limits, snapshot write last/average/max duration, and `db_table_bytes`, `db_index_bytes`, and `db_total_bytes` where the backing store can report them. `GET /metrics/history?limit=48` returns store-backed rolling trend samples captured from recent `/metrics` calls. Memory mode keeps the recent window in process; PostgreSQL mode persists it in `metrics_history` so the console can restore capacity trend context after app restart. The console Capacity panel uses those fields to show per-run storage pressure, restored growth trends after browser refresh, replay write latency trends, database table/index size movement, and archive-watch guidance.
+
 Key Prometheus metrics:
 
 - `ship_sim_http_requests_total`
@@ -37,11 +39,23 @@ Key Prometheus metrics:
 - `ship_sim_engines_total`
 - `ship_sim_engines_running`
 - `ship_sim_snapshot_frames_total`
+- `ship_sim_snapshot_capacity_pressure`
+- `ship_sim_snapshot_capacity_limit`
+- `ship_sim_events_total`
+- `ship_sim_event_capacity_pressure`
+- `ship_sim_event_capacity_limit`
+- `ship_sim_track_points_total`
+- `ship_sim_track_point_capacity_pressure`
+- `ship_sim_track_point_capacity_limit`
+- `ship_sim_contacts_total`
 - `ship_sim_snapshot_writes_total`
 - `ship_sim_snapshot_write_failures_total`
 - `ship_sim_snapshot_write_duration_seconds`
 - `ship_sim_db_ready`
 - `ship_sim_db_migration_version`
+- `ship_sim_db_table_bytes`
+- `ship_sim_db_index_bytes`
+- `ship_sim_db_total_bytes`
 
 Prometheus scrape example:
 
@@ -61,6 +75,7 @@ HTTP request logs include:
 
 - `request_id`
 - `user_id`
+- `role`
 - `run_id`
 - `method`
 - `path`

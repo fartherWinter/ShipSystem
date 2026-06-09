@@ -1,21 +1,29 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Activity,
+  Bookmark,
+  BookmarkPlus,
+  BookOpen,
   ChevronLeft,
   ChevronRight,
+  CheckCircle,
   Clock,
+  Copy,
   Database,
   Download,
+  Eraser,
   FileJson,
   Filter,
   FileText,
   LogIn,
   LogOut,
+  MapPin,
   Pause,
   Play,
   Radio,
   RefreshCw,
   Route,
+  Save,
   Shield,
   SkipBack,
   SkipForward,
@@ -23,11 +31,33 @@ import {
   StepBack,
   StepForward,
   Tags,
+  Trash2,
+  Undo2,
   Waves,
   Zap
 } from "lucide-react";
 import type { FrontendAuthMode } from "./config";
-import type { ConnectionState, Run, RunMetadata, RunReport, ScenarioSummary, SimEvent, Snapshot, SnapshotFrame, Track, TrainingAction } from "./types";
+import type {
+  AssessmentRules,
+  CapacityTrendSample,
+  ConnectionState,
+  CourseTemplate,
+  MetricsResponse,
+  ReplayBookmark,
+  Run,
+  RunMetadata,
+  RunReport,
+  ScenarioEditorMapMode,
+  ScenarioEditorTemplate,
+  ScenarioSummary,
+  SessionResponse,
+  SimEvent,
+  Snapshot,
+  SnapshotFrame,
+  Track,
+  TrainingAction,
+  Zone
+} from "./types";
 import { trainingActions } from "./types";
 
 type ThreatFilter = "all" | "high" | "medium" | "low";
@@ -36,10 +66,34 @@ type SeverityFilter = "all" | "info" | "warning" | "error";
 export type ReplaySpeed = 0.5 | 1 | 2 | 4;
 export type ReportExportFormat = "json" | "csv" | "html" | "pdf";
 
+type AssessmentRuleDraft = {
+  name: string;
+  actionTarget: string;
+  replayTarget: string;
+  actionWeight: string;
+  replayWeight: string;
+  contextWeight: string;
+};
+
 type ControlSidebarProps = {
   runs: Run[];
+  courseTemplates: CourseTemplate[];
+  selectedCourseTemplateID: string;
+  courseTemplateStatus: string;
+  courseTemplateError: string;
   scenarios: ScenarioSummary[];
   selectedScenarioID: string;
+  scenarioEditorText: string;
+  scenarioEditorStatus: string;
+  scenarioEditorError: string;
+  scenarioEditorLoading: boolean;
+  scenarioEditorValid: boolean;
+  scenarioEditorGuidance: string[];
+  scenarioEditorDiff: string;
+  scenarioEditorMapMode: ScenarioEditorMapMode;
+  scenarioEditorZoneDraftCount: number;
+  selectedScenarioEditorZoneID: string;
+  selectedScenarioEditorVertexIndex: number;
   run: Run | null;
   snapshot: Snapshot | null;
   snapshotFrames: SnapshotFrame[];
@@ -47,7 +101,13 @@ type ControlSidebarProps = {
   replayIndex: number;
   replayPlaying: boolean;
   replaySpeed: ReplaySpeed;
+  replayAnchorStatus: string;
+  reportExportStatus: string;
+  replayBookmarks: ReplayBookmark[];
   report: RunReport | null;
+  metrics: MetricsResponse | null;
+  capacityTrend: CapacityTrendSample[];
+  session: SessionResponse | null;
   tracks: Track[];
   visibleTrackCount: number;
   threatFilter: ThreatFilter;
@@ -61,6 +121,8 @@ type ControlSidebarProps = {
   error: string;
   busy: boolean;
   onCreateRun: () => void;
+  onSelectCourseTemplate: (templateID: string) => void;
+  onApplyCourseTemplate: () => void;
   onCommand: (command: "start" | "pause" | "stop") => void;
   onAction: (type: TrainingAction) => void;
   onSelectRun: (run: Run) => void;
@@ -68,6 +130,18 @@ type ControlSidebarProps = {
   onScenarioFile: (file: File) => void;
   onCopyScenario: (name: string) => void;
   onSetScenarioEnabled: (enabled: boolean) => void;
+  onScenarioEditorText: (text: string) => void;
+  onLoadScenarioEditor: () => void;
+  onSaveScenarioEditor: () => void;
+  onScenarioEditorMapMode: (mode: ScenarioEditorMapMode) => void;
+  onScenarioTemplate: (template: ScenarioEditorTemplate) => void;
+  onScenarioAssessmentRules: (rules: AssessmentRules | null) => void;
+  onScenarioEditorZoneSelect: (zoneID: string) => void;
+  onScenarioEditorVertexSelect: (index: number) => void;
+  onScenarioEditorZoneDelete: () => void;
+  onScenarioZoneDraftUndo: () => void;
+  onScenarioZoneDraftClear: () => void;
+  onScenarioZoneDraftFinish: () => void;
   onSaveRunMetadata: (metadata: RunMetadata) => void;
   onAddAnnotation: (eventID: string, note: string) => void;
   onThreatFilter: (filter: ThreatFilter) => void;
@@ -78,6 +152,10 @@ type ControlSidebarProps = {
   onReplayRetry: () => void;
   onReplayPlayToggle: () => void;
   onReplaySpeed: (speed: ReplaySpeed) => void;
+  onCopyReplayAnchor: () => void;
+  onSaveReplayBookmark: () => void;
+  onOpenReplayBookmark: (bookmark: ReplayBookmark) => void;
+  onDeleteReplayBookmark: (id: string) => void;
   onJumpToEvent: (event: SimEvent) => void;
   onLiveView: () => void;
   onExportReport: (format: ReportExportFormat) => void;
@@ -88,8 +166,23 @@ type ControlSidebarProps = {
 
 export function ControlSidebar({
   runs,
+  courseTemplates,
+  selectedCourseTemplateID,
+  courseTemplateStatus,
+  courseTemplateError,
   scenarios,
   selectedScenarioID,
+  scenarioEditorText,
+  scenarioEditorStatus,
+  scenarioEditorError,
+  scenarioEditorLoading,
+  scenarioEditorValid,
+  scenarioEditorGuidance,
+  scenarioEditorDiff,
+  scenarioEditorMapMode,
+  scenarioEditorZoneDraftCount,
+  selectedScenarioEditorZoneID,
+  selectedScenarioEditorVertexIndex,
   run,
   snapshot,
   snapshotFrames,
@@ -97,7 +190,13 @@ export function ControlSidebar({
   replayIndex,
   replayPlaying,
   replaySpeed,
+  replayAnchorStatus,
+  reportExportStatus,
+  replayBookmarks,
   report,
+  metrics,
+  capacityTrend,
+  session,
   tracks,
   visibleTrackCount,
   threatFilter,
@@ -111,6 +210,8 @@ export function ControlSidebar({
   error,
   busy,
   onCreateRun,
+  onSelectCourseTemplate,
+  onApplyCourseTemplate,
   onCommand,
   onAction,
   onSelectRun,
@@ -118,6 +219,18 @@ export function ControlSidebar({
   onScenarioFile,
   onCopyScenario,
   onSetScenarioEnabled,
+  onScenarioEditorText,
+  onLoadScenarioEditor,
+  onSaveScenarioEditor,
+  onScenarioEditorMapMode,
+  onScenarioTemplate,
+  onScenarioAssessmentRules,
+  onScenarioEditorZoneSelect,
+  onScenarioEditorVertexSelect,
+  onScenarioEditorZoneDelete,
+  onScenarioZoneDraftUndo,
+  onScenarioZoneDraftClear,
+  onScenarioZoneDraftFinish,
   onSaveRunMetadata,
   onAddAnnotation,
   onThreatFilter,
@@ -128,6 +241,10 @@ export function ControlSidebar({
   onReplayRetry,
   onReplayPlayToggle,
   onReplaySpeed,
+  onCopyReplayAnchor,
+  onSaveReplayBookmark,
+  onOpenReplayBookmark,
+  onDeleteReplayBookmark,
   onJumpToEvent,
   onLiveView,
   onExportReport,
@@ -146,6 +263,7 @@ export function ControlSidebar({
   const [archived, setArchived] = useState(false);
   const [annotationEventID, setAnnotationEventID] = useState("");
   const [annotationNote, setAnnotationNote] = useState("");
+  const [assessmentRuleDraft, setAssessmentRuleDraft] = useState<AssessmentRuleDraft>(() => assessmentRuleDraftFromText(""));
   const highThreats = tracks.filter((track) => track.threat_level === "high").length;
   const statusText = snapshot?.status ?? run?.status ?? "idle";
   const started = run?.started_at ? new Date(run.started_at).getTime() : 0;
@@ -162,6 +280,9 @@ export function ControlSidebar({
   const windowLabel =
     replayWindowStart && replayWindowEnd ? `${formatShortTime(replayWindowStart)} - ${formatShortTime(replayWindowEnd)}` : "No window loaded";
   const reportEvents = report?.events?.length ? report.events : events;
+  const reportActionStats = report?.event_audit.action_stats ?? [];
+  const reportActorStats = report?.event_audit.actor_stats ?? [];
+  const reportAnnotations = report?.annotations ?? [];
   const actionOptions = useMemo(() => uniqueActions(reportEvents), [reportEvents]);
   const filteredEvents = useMemo(
     () => filterEvents(reportEvents, actionFilter, severityFilter, fromFilter, toFilter),
@@ -170,10 +291,24 @@ export function ControlSidebar({
   const replayDisabled = !canReplay || busy || replayLoading;
   const legacyReplay = report?.replay_mode === "legacy";
   const replayProgress = replayRange ? timelineProgress(replayRange.from, replayRange.to, activeReplayFrame?.sampled_at) : 0;
+  const replayInsights = buildReplayInsights(report, snapshotFrames, reportEvents);
   const canPagePrevious = canPageWindow(replayRange?.from, replayWindowStart, "previous") && !replayDisabled && !legacyReplay;
   const canPageNext = canPageWindow(replayRange?.to, replayWindowEnd, "next") && !replayDisabled && !legacyReplay;
+  const canAnchorReplay = Boolean(run && (activeReplayFrame || snapshot));
+  const selectedCourseTemplate = courseTemplates.find((template) => template.id === selectedCourseTemplateID);
+  const selectedCourseChecklist = selectedCourseTemplate?.review_checklist ?? [];
   const selectedScenario = scenarios.find((scenario) => scenario.id === selectedScenarioID);
   const scenarioDisabled = selectedScenario?.enabled === false;
+  const scenarioEditable = selectedScenario?.source === "database";
+  const scenarioMapDisabled = busy || scenarioEditorLoading || !scenarioEditorValid || scenarioEditorText.trim() === "";
+  const scenarioGeometryZones = scenarioZonesFromText(scenarioEditorText);
+  const selectedScenarioGeometryZone = scenarioGeometryZones.find((zone) => zone.id === selectedScenarioEditorZoneID) ?? scenarioGeometryZones[0] ?? null;
+  const selectedScenarioGeometryZoneID = selectedScenarioGeometryZone?.id ?? "";
+  const scenarioGeometryVertices = selectedScenarioGeometryZone?.polygon ?? [];
+  const assessmentRuleSummary = assessmentRuleDraftSummary(assessmentRuleDraft);
+  const assessmentRuleApplyDisabled = scenarioMapDisabled || !assessmentRuleDraftValid(assessmentRuleDraft);
+  const capacitySummary = buildCapacitySummary(metrics, runs);
+  const capacityTrendSummary = buildCapacityTrendSummary(capacityTrend);
 
   useEffect(() => {
     setTagInput((run?.tags ?? []).join(", "));
@@ -187,6 +322,16 @@ export function ControlSidebar({
       setAnnotationEventID(reportEvents[0].id);
     }
   }, [annotationEventID, reportEvents]);
+
+  useEffect(() => {
+    setAssessmentRuleDraft(assessmentRuleDraftFromText(scenarioEditorText));
+  }, [scenarioEditorText]);
+
+  useEffect(() => {
+    if (!selectedScenarioEditorZoneID && scenarioGeometryZones[0]?.id) {
+      onScenarioEditorZoneSelect(scenarioGeometryZones[0].id);
+    }
+  }, [onScenarioEditorZoneSelect, scenarioGeometryZones, selectedScenarioEditorZoneID]);
 
   return (
     <aside className="sidebar">
@@ -239,6 +384,28 @@ export function ControlSidebar({
         </section>
       ) : null}
 
+      {!authRequired && session ? (
+        <section className="authPanel" aria-label="Access summary">
+          <div className="sectionHeader">
+            <h2>Access</h2>
+            <Shield size={16} />
+          </div>
+          <div className="accessSummary">
+            <span>{session.auth_mode === "off" ? "local" : session.auth_mode}</span>
+            <b>{session.role}</b>
+            {session.role_source ? <span>{session.role_source}</span> : null}
+          </div>
+          <p className="emptyLine">{session.user_id || "local session"}</p>
+          <div className="permissionList" aria-label="Session permissions">
+            {sessionPermissionLabels(session).map((item) => (
+              <span key={item.label} data-enabled={item.enabled}>
+                {item.label}
+              </span>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
       <section className="panel">
         <Metric label="Status" value={statusText} />
         <Metric label="Tracks" value={tracks.length.toString()} />
@@ -249,6 +416,49 @@ export function ControlSidebar({
         <Metric label="Elapsed" value={`${elapsedSeconds}s`} />
         <Metric label="Frame" value={frameLabel} />
         <Metric label="Report" value={report ? `v${report.version}` : "none"} />
+      </section>
+
+      <section className="coursePanel">
+        <div className="sectionHeader">
+          <h2>Course</h2>
+          <BookOpen size={16} />
+        </div>
+        <select
+          value={selectedCourseTemplateID}
+          onChange={(event) => onSelectCourseTemplate(event.target.value)}
+          disabled={busy || courseTemplates.length === 0}
+        >
+          {courseTemplates.length === 0 ? (
+            <option value="">No course templates</option>
+          ) : (
+            courseTemplates.map((template) => (
+              <option key={template.id} value={template.id}>
+                {template.name}{template.enabled === false ? " (disabled)" : ""}
+              </option>
+            ))
+          )}
+        </select>
+        <div className="scenarioMeta">
+          <span>{selectedCourseTemplate?.source ?? "none"}</span>
+          <b data-enabled={selectedCourseTemplate?.enabled !== false}>{selectedCourseTemplate?.enabled === false ? "Disabled" : "Ready"}</b>
+        </div>
+        {selectedCourseTemplate ? (
+          <div className="courseTemplateDetail" aria-label="Course template detail">
+            <span>Scenario {selectedCourseTemplate.scenario?.name ?? "Untitled scenario"}</span>
+            <span>{courseMetadataSummary(selectedCourseTemplate)}</span>
+            <span>{courseAssessmentSummary(selectedCourseTemplate)}</span>
+            {selectedCourseChecklist.slice(0, 3).map((item) => (
+              <span key={item.id}>{item.label}</span>
+            ))}
+          </div>
+        ) : (
+          <p className="emptyLine">No course template loaded</p>
+        )}
+        <button onClick={onApplyCourseTemplate} disabled={busy || authRequired || !selectedCourseTemplate || selectedCourseTemplate.enabled === false}>
+          <BookOpen size={16} /> Create Scenario
+        </button>
+        {courseTemplateStatus ? <b className="statusLine" data-state="ok">{courseTemplateStatus}</b> : null}
+        {courseTemplateError ? <b className="statusLine" data-state="error">{courseTemplateError}</b> : null}
       </section>
 
       <section className="selectorPanel">
@@ -291,6 +501,183 @@ export function ControlSidebar({
             {selectedScenario?.enabled === false ? "Enable" : "Disable"}
           </button>
         </div>
+        <div className="scenarioEditor">
+          <div className="sectionHeader">
+            <h3>Scenario JSON</h3>
+            <div className="editorButtons">
+              <button onClick={onLoadScenarioEditor} disabled={busy || scenarioEditorLoading || !selectedScenario}>
+                <FileJson size={16} /> Load
+              </button>
+              <button
+                onClick={onSaveScenarioEditor}
+                disabled={busy || scenarioEditorLoading || !scenarioEditable || !scenarioEditorValid || scenarioEditorText.trim() === ""}
+                aria-label="Save scenario JSON"
+              >
+                <Save size={16} /> Save
+              </button>
+            </div>
+          </div>
+          <textarea
+            className="scenarioJson"
+            value={scenarioEditorText}
+            onChange={(event) => onScenarioEditorText(event.target.value)}
+            placeholder="Load scenario JSON"
+            spellCheck={false}
+            disabled={busy || scenarioEditorLoading || !selectedScenario}
+          />
+          <div className="scenarioMapTools" aria-label="Scenario map editor">
+            <div className="scenarioMapModes">
+              {(["off", "sensor", "zone", "vertex"] as ScenarioEditorMapMode[]).map((mode) => (
+                <button
+                  key={mode}
+                  onClick={() => onScenarioEditorMapMode(mode)}
+                  disabled={mode !== "off" && scenarioMapDisabled}
+                  data-active={scenarioEditorMapMode === mode}
+                  aria-label={`Scenario map mode ${mode}`}
+                >
+                  {mode === "sensor" ? <MapPin size={15} /> : mode === "zone" || mode === "vertex" ? <Route size={15} /> : <Activity size={15} />}
+                  {mode}
+                </button>
+              ))}
+            </div>
+            <div className="scenarioGeometryEditor" aria-label="Scenario geometry editor">
+              <select
+                value={selectedScenarioGeometryZoneID}
+                onChange={(event) => onScenarioEditorZoneSelect(event.target.value)}
+                disabled={scenarioMapDisabled || scenarioGeometryZones.length === 0}
+                aria-label="Scenario geometry zone"
+              >
+                {scenarioGeometryZones.length === 0 ? (
+                  <option value="">No zones</option>
+                ) : (
+                  scenarioGeometryZones.map((zone) => (
+                    <option key={zone.id} value={zone.id}>
+                      {zone.name || zone.id}
+                    </option>
+                  ))
+                )}
+              </select>
+              <select
+                value={Math.min(selectedScenarioEditorVertexIndex, Math.max(0, scenarioGeometryVertices.length - 1))}
+                onChange={(event) => onScenarioEditorVertexSelect(Number(event.target.value))}
+                disabled={scenarioMapDisabled || scenarioGeometryVertices.length === 0}
+                aria-label="Scenario geometry vertex"
+              >
+                {scenarioGeometryVertices.length === 0 ? (
+                  <option value={0}>No vertices</option>
+                ) : (
+                  scenarioGeometryVertices.map((point, index) => (
+                    <option key={`${point.lon}-${point.lat}-${index}`} value={index}>
+                      Vertex {index + 1}
+                    </option>
+                  ))
+                )}
+              </select>
+              <button onClick={onScenarioEditorZoneDelete} disabled={scenarioMapDisabled || !selectedScenarioGeometryZoneID} aria-label="Delete scenario zone">
+                <Trash2 size={15} /> Delete
+              </button>
+            </div>
+            <div className="scenarioTemplates" aria-label="Scenario visual templates">
+              <button onClick={() => onScenarioTemplate("review_sensor")} disabled={scenarioMapDisabled} aria-label="Add simulated sensor template">
+                <Radio size={15} /> Sensor
+              </button>
+              <button onClick={() => onScenarioTemplate("exercise_boundary")} disabled={scenarioMapDisabled} aria-label="Add exercise boundary template">
+                <Square size={15} /> Boundary
+              </button>
+              <button onClick={() => onScenarioTemplate("focus_zone")} disabled={scenarioMapDisabled} aria-label="Add focus zone template">
+                <Route size={15} /> Focus
+              </button>
+            </div>
+            <div className="assessmentRuleForm" aria-label="Assessment rule editor">
+              <input
+                value={assessmentRuleDraft.name}
+                onChange={(event) => setAssessmentRuleDraft((draft) => ({ ...draft, name: event.target.value }))}
+                placeholder="Rule name"
+                disabled={scenarioMapDisabled}
+              />
+              <input
+                type="number"
+                min="1"
+                max="1000"
+                value={assessmentRuleDraft.actionTarget}
+                onChange={(event) => setAssessmentRuleDraft((draft) => ({ ...draft, actionTarget: event.target.value }))}
+                aria-label="Assessment action target"
+                disabled={scenarioMapDisabled}
+              />
+              <input
+                type="number"
+                min="1"
+                max="1000000"
+                value={assessmentRuleDraft.replayTarget}
+                onChange={(event) => setAssessmentRuleDraft((draft) => ({ ...draft, replayTarget: event.target.value }))}
+                aria-label="Assessment replay target"
+                disabled={scenarioMapDisabled}
+              />
+              <input
+                type="number"
+                min="0"
+                max="100"
+                value={assessmentRuleDraft.actionWeight}
+                onChange={(event) => setAssessmentRuleDraft((draft) => ({ ...draft, actionWeight: event.target.value }))}
+                aria-label="Assessment action weight"
+                disabled={scenarioMapDisabled}
+              />
+              <input
+                type="number"
+                min="0"
+                max="100"
+                value={assessmentRuleDraft.replayWeight}
+                onChange={(event) => setAssessmentRuleDraft((draft) => ({ ...draft, replayWeight: event.target.value }))}
+                aria-label="Assessment replay weight"
+                disabled={scenarioMapDisabled}
+              />
+              <input
+                type="number"
+                min="0"
+                max="100"
+                value={assessmentRuleDraft.contextWeight}
+                onChange={(event) => setAssessmentRuleDraft((draft) => ({ ...draft, contextWeight: event.target.value }))}
+                aria-label="Assessment context weight"
+                disabled={scenarioMapDisabled}
+              />
+              <span data-state={assessmentRuleSummary.valid ? "ok" : "warning"}>{assessmentRuleSummary.label}</span>
+              <button
+                onClick={() => onScenarioAssessmentRules(assessmentRulesFromDraft(assessmentRuleDraft))}
+                disabled={assessmentRuleApplyDisabled}
+                aria-label="Apply assessment rules"
+              >
+                <CheckCircle size={15} /> Apply
+              </button>
+              <button onClick={() => onScenarioAssessmentRules(null)} disabled={scenarioMapDisabled} aria-label="Clear assessment rules">
+                <Eraser size={15} /> Clear
+              </button>
+            </div>
+            <div className="scenarioZoneDraft">
+              <span>Draft {scenarioEditorZoneDraftCount}</span>
+              <button onClick={onScenarioZoneDraftFinish} disabled={scenarioMapDisabled || scenarioEditorZoneDraftCount < 3} aria-label="Finish scenario zone">
+                <CheckCircle size={15} />
+              </button>
+              <button onClick={onScenarioZoneDraftUndo} disabled={scenarioEditorZoneDraftCount === 0 || busy} aria-label="Undo scenario zone point">
+                <Undo2 size={15} />
+              </button>
+              <button onClick={onScenarioZoneDraftClear} disabled={scenarioEditorZoneDraftCount === 0 || busy} aria-label="Clear scenario zone draft">
+                <Eraser size={15} />
+              </button>
+            </div>
+          </div>
+          <div className="scenarioEditorMeta">
+            <span>{scenarioEditable ? "Database scenario editable" : "Copy built-in or file scenarios before editing"}</span>
+            <span data-state={scenarioEditorValid ? "ok" : "warning"}>{scenarioEditorGuidance[0] ?? "Load or paste scenario JSON before saving."}</span>
+            {scenarioEditorGuidance.slice(1, 4).map((item) => (
+              <span key={item} data-state="warning">
+                {item}
+              </span>
+            ))}
+            <span>{scenarioEditorDiff}</span>
+            {scenarioEditorStatus ? <b data-state="ok">{scenarioEditorStatus}</b> : null}
+            {scenarioEditorError ? <b data-state="error">{scenarioEditorError}</b> : null}
+          </div>
+        </div>
       </section>
 
       <section className="filterPanel" aria-label="Threat filter">
@@ -322,6 +709,11 @@ export function ControlSidebar({
             <b>{windowLabel}</b>
           </div>
           <progress max="100" value={replayProgress} aria-label="Replay timeline progress" />
+          <div className="replayInsights" aria-label="Replay quality summary">
+            <span data-state={replayInsights.coverageState}>{replayInsights.coverageLabel}</span>
+            <span data-state={replayInsights.gapState}>{replayInsights.gapLabel}</span>
+            <span>{replayInsights.eventDensityLabel}</span>
+          </div>
         </div>
         {replayLoading ? <p className="replayStatus">Loading replay window</p> : null}
         {replayError ? (
@@ -368,6 +760,30 @@ export function ControlSidebar({
             ))}
           </select>
         </div>
+        <div className="replayReviewActions">
+          <button onClick={onCopyReplayAnchor} disabled={!canAnchorReplay || busy || replayLoading} aria-label="Copy replay anchor">
+            <Copy size={16} /> Copy Anchor
+          </button>
+          <button onClick={onSaveReplayBookmark} disabled={!canAnchorReplay || busy || replayLoading} aria-label="Save replay bookmark">
+            <BookmarkPlus size={16} /> Bookmark
+          </button>
+        </div>
+        {replayAnchorStatus ? <p className="replayAnchorStatus">{replayAnchorStatus}</p> : null}
+        {replayBookmarks.length > 0 ? (
+          <div className="replayBookmarkList" aria-label="Replay bookmarks">
+            {replayBookmarks.slice(0, 6).map((bookmark) => (
+              <div key={bookmark.id}>
+                <button onClick={() => onOpenReplayBookmark(bookmark)} disabled={busy || replayLoading} title={formatBookmark(bookmark)}>
+                  <Bookmark size={14} />
+                  <span>{bookmark.label}</span>
+                </button>
+                <button onClick={() => onDeleteReplayBookmark(bookmark.id)} disabled={busy} aria-label={`Delete bookmark ${bookmark.label}`}>
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : null}
         <input
           type="range"
           min="0"
@@ -382,6 +798,7 @@ export function ControlSidebar({
               <button
                 key={event.id}
                 title={formatEvent(event)}
+                data-severity={eventSeverity(event)}
                 disabled={busy || legacyReplay || !canReplay}
                 onClick={() => onJumpToEvent(event)}
                 aria-label={`Jump to ${eventAction(event)} at ${formatTime(event.occurred_at)}`}
@@ -449,6 +866,67 @@ export function ControlSidebar({
         <p>No real weapon, fire-control, radar, or electronic-warfare interface is implemented.</p>
       </section>
 
+      <section className="capacityPanel">
+        <div className="sectionHeader">
+          <h2>Capacity</h2>
+          <Database size={16} />
+        </div>
+        <div className="reportGrid">
+          <Metric label="Frames" value={capacitySummary.frames} />
+          <Metric label="Events" value={capacitySummary.events} />
+          <Metric label="Points" value={capacitySummary.points} />
+          <Metric label="Contacts" value={capacitySummary.contacts} />
+        </div>
+        <div className="capacityLimits">
+          <span>Snapshot pressure {capacitySummary.snapshotPressure}</span>
+          <span>Event pressure {capacitySummary.eventPressure}</span>
+          <span>Point pressure {capacitySummary.pointPressure}</span>
+        </div>
+        <div className="capacityLimits">
+          <span>Snapshots/run {capacitySummary.snapshotLimit}</span>
+          <span>Events/run {capacitySummary.eventLimit}</span>
+          <span>Points/run {capacitySummary.pointLimit}</span>
+        </div>
+        <div className="capacityLatency">
+          <span>DB {capacitySummary.db}</span>
+          <span>Write fail {capacitySummary.failures}</span>
+          <span>Last {capacitySummary.writeLast}</span>
+          <span>Avg {capacitySummary.writeAvg}</span>
+          <span>Max {capacitySummary.writeMax}</span>
+        </div>
+        <div className="capacityDbPlan" aria-label="Database planning">
+          <span>Tables {capacitySummary.dbTable}</span>
+          <span>Indexes {capacitySummary.dbIndex}</span>
+          <span>Total {capacitySummary.dbTotal}</span>
+          <strong data-state={capacitySummary.dbIndexState}>{capacitySummary.dbIndexRatio}</strong>
+        </div>
+        {capacityTrendSummary ? (
+          <div className="capacityTrend" aria-label="Capacity trend">
+            <span>{capacityTrendSummary.windowLabel}</span>
+            <span>{capacityTrendSummary.frameGrowth}</span>
+            <span>{capacityTrendSummary.eventGrowth}</span>
+            <span>{capacityTrendSummary.pointGrowth}</span>
+            <span>{capacityTrendSummary.dbGrowth}</span>
+            <span>{capacityTrendSummary.latencyTrend}</span>
+            <strong data-state={capacityTrendSummary.archiveState}>{capacityTrendSummary.archiveGuidance}</strong>
+          </div>
+        ) : null}
+        {capacitySummary.runRows.length > 0 ? (
+          <div className="capacityRunList" aria-label="Capacity by run">
+            {capacitySummary.runRows.map((row) => (
+              <div key={row.id}>
+                <span>{row.name}</span>
+                <b>S {row.frames}</b>
+                <b>E {row.events}</b>
+                <b>P {row.points}</b>
+                <b>C {row.contacts}</b>
+                <strong>{row.pressure}</strong>
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </section>
+
       <section className="reportPanel">
         <div className="sectionHeader">
           <h2>Report</h2>
@@ -467,6 +945,7 @@ export function ControlSidebar({
             </button>
           </div>
         </div>
+        {reportExportStatus ? <p className="replayAnchorStatus">{reportExportStatus}</p> : null}
         {report ? (
           <>
             <div className="reportGrid">
@@ -511,10 +990,10 @@ export function ControlSidebar({
               </label>
             </div>
             <div className="actionStats">
-              {report.event_audit.action_stats.length === 0 ? (
+              {reportActionStats.length === 0 ? (
                 <p className="emptyLine">No actions yet</p>
               ) : (
-                report.event_audit.action_stats.map((stat) => (
+                reportActionStats.map((stat) => (
                   <span key={stat.type}>
                     {stat.type}: <b>{stat.count}</b>
                   </span>
@@ -527,7 +1006,7 @@ export function ControlSidebar({
             </div>
             <div className="auditSummary">
               <span>Events {report.event_audit.event_count}</span>
-              <span>Actors {report.event_audit.actor_stats.length}</span>
+              <span>Actors {reportActorStats.length}</span>
               <span>First {formatTime(report.event_audit.first_action_at)}</span>
               <span>Last {formatTime(report.event_audit.last_action_at)}</span>
             </div>
@@ -550,9 +1029,9 @@ export function ControlSidebar({
                 Add Annotation
               </button>
             </div>
-            {report.annotations.length > 0 ? (
+            {reportAnnotations.length > 0 ? (
               <div className="annotationList">
-                {report.annotations.slice(0, 4).map((annotation) => (
+                {reportAnnotations.slice(0, 4).map((annotation) => (
                   <span key={annotation.id}>
                     {formatShortTime(annotation.created_at)} {annotation.note}
                   </span>
@@ -621,6 +1100,333 @@ function filterEvents(events: SimEvent[], action: string, severity: SeverityFilt
   });
 }
 
+function sessionPermissionLabels(session: SessionResponse) {
+  const permissions = session.permissions ?? {};
+  return [
+    { label: "View", enabled: Boolean(permissions.view_runs) },
+    { label: "Run ops", enabled: Boolean(permissions.create_runs && permissions.control_runs) },
+    { label: "Training actions", enabled: Boolean(permissions.submit_training_actions) },
+    { label: "Scenarios", enabled: Boolean(permissions.manage_scenarios) },
+    { label: "Retention", enabled: Boolean(permissions.manage_retention) }
+  ];
+}
+
+function courseMetadataSummary(template: CourseTemplate) {
+  const metadataKeys = Object.keys(template.expected_metadata ?? {});
+  const checklistCount = (template.review_checklist ?? []).length;
+  const metadataLabel = metadataKeys.length > 0 ? metadataKeys.slice(0, 3).join(", ") : "no metadata";
+  const suffix = metadataKeys.length > 3 ? ` +${metadataKeys.length - 3}` : "";
+  return `Metadata ${metadataLabel}${suffix} | Checklist ${checklistCount}`;
+}
+
+function courseAssessmentSummary(template: CourseTemplate) {
+  const rules = template.scenario?.assessment_rules;
+  if (!rules) {
+    return `Rules profile ${template.scenario?.assessment_profile ?? "standard"}`;
+  }
+  return `Rules ${assessmentRuleName(rules)} | Actions ${rules.action_target} | Replay ${rules.replay_target} | Weights ${rules.action_weight}/${rules.replay_weight}/${rules.context_weight}`;
+}
+
+function assessmentRuleName(rules: AssessmentRules) {
+  return rules.name?.trim() || "custom_record";
+}
+
+function assessmentRuleDraftFromText(text: string): AssessmentRuleDraft {
+  const scenario = parseScenarioDraft(text);
+  const rules = scenario?.assessment_rules ?? assessmentPresetRules(scenario?.assessment_profile);
+  return {
+    name: rules.name ?? "",
+    actionTarget: String(rules.action_target),
+    replayTarget: String(rules.replay_target),
+    actionWeight: String(rules.action_weight),
+    replayWeight: String(rules.replay_weight),
+    contextWeight: String(rules.context_weight)
+  };
+}
+
+function parseScenarioDraft(text: string) {
+  try {
+    return JSON.parse(text) as { assessment_profile?: string; assessment_rules?: AssessmentRules };
+  } catch {
+    return null;
+  }
+}
+
+function scenarioZonesFromText(text: string): Zone[] {
+  try {
+    const scenario = JSON.parse(text) as { zones?: Zone[] };
+    return Array.isArray(scenario.zones) ? scenario.zones : [];
+  } catch {
+    return [];
+  }
+}
+
+function assessmentPresetRules(profile?: string): AssessmentRules {
+  switch (profile) {
+    case "quick_review":
+      return { name: "quick_review_record", action_target: 3, replay_target: 8, action_weight: 30, replay_weight: 30, context_weight: 40 };
+    case "extended_review":
+      return { name: "extended_review_record", action_target: 10, replay_target: 60, action_weight: 40, replay_weight: 35, context_weight: 25 };
+    default:
+      return { name: "standard_record", action_target: 6, replay_target: 20, action_weight: 34, replay_weight: 33, context_weight: 33 };
+  }
+}
+
+function assessmentRulesFromDraft(draft: AssessmentRuleDraft): AssessmentRules {
+  return {
+    name: draft.name.trim() || undefined,
+    action_target: numberFromDraft(draft.actionTarget),
+    replay_target: numberFromDraft(draft.replayTarget),
+    action_weight: numberFromDraft(draft.actionWeight),
+    replay_weight: numberFromDraft(draft.replayWeight),
+    context_weight: numberFromDraft(draft.contextWeight)
+  };
+}
+
+function assessmentRuleDraftSummary(draft: AssessmentRuleDraft) {
+  const values = assessmentRulesFromDraft(draft);
+  const total = values.action_weight + values.replay_weight + values.context_weight;
+  const valid = assessmentRuleDraftValid(draft);
+  return {
+    valid,
+    label: `Weights ${total}/100`
+  };
+}
+
+function assessmentRuleDraftValid(draft: AssessmentRuleDraft) {
+  const values = assessmentRulesFromDraft(draft);
+  return (
+    inRange(values.action_target, 1, 1000) &&
+    inRange(values.replay_target, 1, 1_000_000) &&
+    inRange(values.action_weight, 0, 100) &&
+    inRange(values.replay_weight, 0, 100) &&
+    inRange(values.context_weight, 0, 100) &&
+    values.action_weight + values.replay_weight + values.context_weight === 100
+  );
+}
+
+function numberFromDraft(value: string) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.round(parsed) : Number.NaN;
+}
+
+function inRange(value: number, min: number, max: number) {
+  return Number.isFinite(value) && value >= min && value <= max;
+}
+
+function buildReplayInsights(report: RunReport | null, frames: SnapshotFrame[], events: SimEvent[]) {
+  const coverage = report?.snapshot_coverage;
+  const range = report?.snapshot_range;
+  if (!coverage || !range || report?.replay_mode === "legacy") {
+    return {
+      coverageLabel: "Coverage unavailable",
+      coverageState: "empty",
+      gapLabel: "Gaps unavailable",
+      gapState: "empty",
+      eventDensityLabel: `Events ${events.length}`
+    };
+  }
+  const rangeMS = timeDiffMS(range.from, range.to);
+  const expectedFrames =
+    coverage.average_interval_ms > 0 && rangeMS > 0 ? Math.max(1, Math.floor(rangeMS / coverage.average_interval_ms) + 1) : coverage.count;
+  const coveragePercent = expectedFrames > 0 ? Math.min(100, Math.round((coverage.count / expectedFrames) * 100)) : 0;
+  const expectedGapMS = coverage.average_interval_ms || (frames[0]?.snapshot_hz ? 1000 / frames[0].snapshot_hz : 0);
+  const largestGapMS = largestWindowGapMS(frames);
+  const gapWarning = expectedGapMS > 0 && largestGapMS > expectedGapMS * 3;
+  const minutes = rangeMS > 0 ? rangeMS / 60000 : 0;
+  const eventRate = minutes > 0 ? events.length / minutes : events.length;
+
+  return {
+    coverageLabel: `Coverage ${coveragePercent}%`,
+    coverageState: coveragePercent >= 90 ? "ok" : "warning",
+    gapLabel: frames.length < 2 ? "Window gaps -" : `Max gap ${formatInterval(largestGapMS)}ms`,
+    gapState: gapWarning ? "warning" : "ok",
+    eventDensityLabel: `Events ${eventRate.toFixed(eventRate < 10 ? 1 : 0)}/min`
+  };
+}
+
+function buildCapacitySummary(metrics: MetricsResponse | null, runs: Run[]) {
+  const frames = metricNumber(metrics, "snapshot_frames");
+  const events = metricNumber(metrics, "event_count");
+  const points = metricNumber(metrics, "track_point_count");
+  const contacts = metricNumber(metrics, "contact_count");
+  const snapshotPressure = metricNumber(metrics, "snapshot_capacity_pressure");
+  const eventPressure = metricNumber(metrics, "event_capacity_pressure");
+  const pointPressure = metricNumber(metrics, "track_point_capacity_pressure");
+  const failures = metricNumber(metrics, "snapshot_write_failures");
+  const dbReady = metricBoolean(metrics, "db_ready");
+  const dbTableBytes = metricNumber(metrics, "db_table_bytes") ?? 0;
+  const dbIndexBytes = metricNumber(metrics, "db_index_bytes") ?? 0;
+  const dbTotalBytes = metricNumber(metrics, "db_total_bytes") ?? 0;
+  const dbIndexPercent = dbTableBytes > 0 ? Math.round((dbIndexBytes / dbTableBytes) * 100) : 0;
+  return {
+    frames: formatMetric(frames),
+    events: formatMetric(events),
+    points: formatMetric(points),
+    contacts: formatMetric(contacts),
+    snapshotPressure: formatPressure(snapshotPressure),
+    eventPressure: formatPressure(eventPressure),
+    pointPressure: formatPressure(pointPressure),
+    failures: formatMetric(failures),
+    db: dbReady === null ? "-" : dbReady ? "ready" : "down",
+    snapshotLimit: formatLimit(metricNumber(metrics, "max_snapshots_per_run")),
+    eventLimit: formatLimit(metricNumber(metrics, "max_events_per_run")),
+    pointLimit: formatLimit(metricNumber(metrics, "max_track_points_per_run")),
+    writeLast: formatMilliseconds(metricNumber(metrics, "snapshot_write_last_ms")),
+    writeAvg: formatMilliseconds(metricNumber(metrics, "snapshot_write_avg_ms")),
+    writeMax: formatMilliseconds(metricNumber(metrics, "snapshot_write_max_ms")),
+    dbTable: formatBytes(dbTableBytes),
+    dbIndex: formatBytes(dbIndexBytes),
+    dbTotal: formatBytes(dbTotalBytes),
+    dbIndexRatio: dbTableBytes > 0 ? `Index/table ${dbIndexPercent}%` : "Index/table -",
+    dbIndexState: dbIndexPercent >= 80 ? "warning" : "ok",
+    runRows: capacityRunRows(metrics, runs)
+  };
+}
+
+function buildCapacityTrendSummary(samples: CapacityTrendSample[]) {
+  if (samples.length === 0) return null;
+  const sorted = [...samples].sort((a, b) => new Date(a.sampled_at).getTime() - new Date(b.sampled_at).getTime());
+  const first = sorted[0];
+  const last = sorted[sorted.length - 1];
+  const windowMS = timeDiffMS(first.sampled_at, last.sampled_at);
+  const maxPressure = Math.max(last.snapshot_capacity_pressure, last.event_capacity_pressure, last.track_point_capacity_pressure);
+  const growingFast = delta(first.track_point_count, last.track_point_count) > 0 && sorted.length >= 3;
+  const archiveState = maxPressure >= 0.8 ? "error" : maxPressure >= 0.6 || growingFast ? "warning" : "ok";
+  return {
+    windowLabel: `Trend ${sorted.length} sample${sorted.length === 1 ? "" : "s"} / ${formatTrendWindow(windowMS)}`,
+    frameGrowth: `Frames ${formatSigned(delta(first.snapshot_frames, last.snapshot_frames))}`,
+    eventGrowth: `Events ${formatSigned(delta(first.event_count, last.event_count))}`,
+    pointGrowth: `Points ${formatSigned(delta(first.track_point_count, last.track_point_count))}`,
+    dbGrowth: `DB ${formatBytes(last.db_total_bytes)} (${formatSignedBytes(delta(first.db_total_bytes, last.db_total_bytes))})`,
+    latencyTrend: `Write avg ${formatMilliseconds(first.snapshot_write_avg_ms)} -> ${formatMilliseconds(last.snapshot_write_avg_ms)}`,
+    archiveState,
+    archiveGuidance: archiveGuidance(archiveState, maxPressure)
+  };
+}
+
+function archiveGuidance(state: string, pressure: number) {
+  if (state === "error") return `Archive soon ${Math.round(pressure * 100)}%`;
+  if (state === "warning") return pressure > 0 ? `Watch growth ${Math.round(pressure * 100)}%` : "Watch growth";
+  return "Archive steady";
+}
+
+function delta(first: number, last: number) {
+  return Math.round(last - first);
+}
+
+function formatSigned(value: number) {
+  return `${value >= 0 ? "+" : ""}${value.toLocaleString()}`;
+}
+
+function formatBytes(value: number) {
+  if (!Number.isFinite(value) || value <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let scaled = value;
+  let index = 0;
+  while (scaled >= 1024 && index < units.length - 1) {
+    scaled /= 1024;
+    index += 1;
+  }
+  const digits = scaled >= 10 || index === 0 ? 0 : 1;
+  return `${scaled.toFixed(digits)} ${units[index]}`;
+}
+
+function formatSignedBytes(value: number) {
+  const sign = value >= 0 ? "+" : "-";
+  return `${sign}${formatBytes(Math.abs(value))}`;
+}
+
+function formatTrendWindow(ms: number) {
+  if (ms <= 0) return "now";
+  const minutes = Math.round(ms / 60000);
+  if (minutes < 60) return `${Math.max(1, minutes)}m`;
+  const hours = Math.round(minutes / 60);
+  return `${hours}h`;
+}
+
+function capacityRunRows(metrics: MetricsResponse | null, runs: Run[]) {
+  const framesByRun = metricNumberRecord(metrics, "snapshot_frames_by_run");
+  const pressureByRun = metricNumberRecord(metrics, "snapshot_capacity_pressure_by_run");
+  const eventsByRun = metricNumberRecord(metrics, "event_count_by_run");
+  const eventPressureByRun = metricNumberRecord(metrics, "event_capacity_pressure_by_run");
+  const pointsByRun = metricNumberRecord(metrics, "track_point_count_by_run");
+  const pointPressureByRun = metricNumberRecord(metrics, "track_point_capacity_pressure_by_run");
+  const contactsByRun = metricNumberRecord(metrics, "contact_count_by_run");
+  const runNames = new Map(runs.map((run) => [run.id, run.name]));
+  const ids = new Set([...Object.keys(framesByRun), ...Object.keys(eventsByRun), ...Object.keys(pointsByRun), ...Object.keys(contactsByRun)]);
+  return Array.from(ids)
+    .map((id) => {
+      const frames = framesByRun[id] ?? 0;
+      const events = eventsByRun[id] ?? 0;
+      const points = pointsByRun[id] ?? 0;
+      const contacts = contactsByRun[id] ?? 0;
+      const sortPressure = Math.max(pressureByRun[id] ?? 0, eventPressureByRun[id] ?? 0, pointPressureByRun[id] ?? 0);
+      return {
+        id,
+        name: runNames.get(id) ?? shortRunID(id),
+        frames: Math.round(frames).toLocaleString(),
+        events: Math.round(events).toLocaleString(),
+        points: Math.round(points).toLocaleString(),
+        contacts: Math.round(contacts).toLocaleString(),
+        pressure: sortPressure === 0 ? "-" : `${Math.round(sortPressure * 100)}%`,
+        sortPressure,
+        sortTotal: frames + events + points + contacts
+      };
+    })
+    .sort((a, b) => b.sortPressure - a.sortPressure || b.sortTotal - a.sortTotal)
+    .slice(0, 5);
+}
+
+function metricNumber(metrics: MetricsResponse | null, key: string) {
+  const value = metrics?.[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function metricBoolean(metrics: MetricsResponse | null, key: string) {
+  const value = metrics?.[key];
+  return typeof value === "boolean" ? value : null;
+}
+
+function metricNumberRecord(metrics: MetricsResponse | null, key: string) {
+  const value = metrics?.[key];
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).filter((entry): entry is [string, number] => typeof entry[1] === "number" && Number.isFinite(entry[1]))
+  );
+}
+
+function formatMetric(value: number | null) {
+  return value === null ? "-" : Math.round(value).toString();
+}
+
+function formatLimit(value: number | null) {
+  return value && value > 0 ? Math.round(value).toLocaleString() : "off";
+}
+
+function formatPressure(value: number | null) {
+  return value === null ? "-" : `${Math.round(value * 100)}%`;
+}
+
+function timeDiffMS(from: string, to: string) {
+  const start = new Date(from).getTime();
+  const end = new Date(to).getTime();
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return 0;
+  return end - start;
+}
+
+function largestWindowGapMS(frames: SnapshotFrame[]) {
+  let largest = 0;
+  for (let i = 1; i < frames.length; i += 1) {
+    const previous = new Date(frames[i - 1].sampled_at).getTime();
+    const current = new Date(frames[i].sampled_at).getTime();
+    if (Number.isFinite(previous) && Number.isFinite(current)) {
+      largest = Math.max(largest, current - previous);
+    }
+  }
+  return largest;
+}
+
 function uniqueActions(events: SimEvent[]) {
   return Array.from(new Set(events.map(eventAction))).filter(Boolean).sort();
 }
@@ -642,6 +1448,10 @@ function formatEvent(event: SimEvent) {
   return typeof result === "string" && result ? `${action}: ${result}` : action;
 }
 
+function formatBookmark(bookmark: ReplayBookmark) {
+  return `${bookmark.label} (${formatShortTime(bookmark.at)})`;
+}
+
 function localDateTimeToMS(value: string) {
   if (!value) return null;
   const ms = new Date(value).getTime();
@@ -661,6 +1471,10 @@ function formatShortTime(value?: string) {
 function formatInterval(value?: number) {
   if (value === undefined || value === null || !Number.isFinite(value)) return "-";
   return Math.round(value).toString();
+}
+
+function formatMilliseconds(value: number | null) {
+  return value === null ? "-" : `${formatInterval(value)}ms`;
 }
 
 function timelineProgress(from: string, to: string, current?: string) {
@@ -685,6 +1499,10 @@ function splitList(value: string) {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function shortRunID(id: string) {
+  return id.slice(0, 8);
 }
 
 function Metric({ label, value }: { label: string; value: string }) {

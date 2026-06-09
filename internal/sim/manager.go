@@ -25,6 +25,7 @@ type Manager struct {
 	logger               *slog.Logger
 	engines              map[string]*Engine
 	scenarios            map[string]scenarioEntry
+	courseTemplates      map[string]model.CourseTemplate
 	metrics              runtimeMetrics
 	snapshotWriteTimeout time.Duration
 }
@@ -91,6 +92,7 @@ func NewManagerWithSnapshotWriteTimeout(st store.Store, logger *slog.Logger, sna
 		logger:               logger,
 		engines:              map[string]*Engine{},
 		scenarios:            map[string]scenarioEntry{},
+		courseTemplates:      map[string]model.CourseTemplate{},
 		snapshotWriteTimeout: snapshotWriteTimeout,
 	}
 	manager.RegisterScenario("default", DefaultScenario(), "builtin")
@@ -458,6 +460,13 @@ func (m *Manager) SnapshotRange(ctx context.Context, id string) (model.SnapshotR
 	return m.store.SnapshotRange(ctx, id)
 }
 
+func (m *Manager) RunDataCounts(ctx context.Context, id string) (model.RunDataCounts, error) {
+	if _, err := m.GetRun(ctx, id); err != nil {
+		return model.RunDataCounts{}, err
+	}
+	return m.store.RunDataCounts(ctx, id)
+}
+
 func (m *Manager) Zones(ctx context.Context, id string) ([]model.Zone, error) {
 	if engine := m.engine(id); engine != nil {
 		return append([]model.Zone(nil), engine.Run().Scenario.Zones...), nil
@@ -525,6 +534,18 @@ func (m *Manager) requireEngine(ctx context.Context, id string) (*Engine, error)
 
 func (m *Manager) StoreStatus(ctx context.Context) (model.StoreStatus, error) {
 	return m.store.Ready(ctx)
+}
+
+func (m *Manager) StoreDataSize(ctx context.Context) (model.StoreDataSize, error) {
+	return m.store.DataSize(ctx)
+}
+
+func (m *Manager) SaveMetricsHistorySample(ctx context.Context, sample model.MetricsHistorySample) error {
+	return m.store.SaveMetricsHistorySample(ctx, sample)
+}
+
+func (m *Manager) MetricsHistory(ctx context.Context, limit int) ([]model.MetricsHistorySample, error) {
+	return m.store.ListMetricsHistorySamples(ctx, limit)
 }
 
 func (m *Manager) RuntimeMetrics() RuntimeMetrics {
@@ -630,28 +651,29 @@ func (m *Manager) recordAudit(ctx context.Context, log model.AuditLog) error {
 }
 
 func trainingAssessment(report model.RunReport) model.TrainingAssessment {
+	profile := assessmentProfileForScenario(report.Run.Scenario)
 	criteria := []model.AssessmentCriterion{
 		{
 			Name:  "training_actions",
-			Value: boundedScore(report.EventAudit.EventCount, 6),
-			Note:  "Abstract count of submitted training actions; not a tactical recommendation.",
+			Value: boundedScore(report.EventAudit.EventCount, profile.ActionTarget),
+			Note:  "Abstract count of submitted training actions; not a tactical recommendation. Profile: " + profile.Name + ".",
 		},
 		{
 			Name:  "replay_coverage",
-			Value: replayCoverageScore(report),
-			Note:  "Replay evidence coverage for after-action review.",
+			Value: replayCoverageScore(report, profile.ReplayTarget),
+			Note:  "Replay evidence coverage for after-action review. Profile: " + profile.Name + ".",
 		},
 		{
 			Name:  "instructor_context",
 			Value: instructorContextScore(report),
-			Note:  "Presence of tags, trainees, instructor notes, and event annotations.",
+			Note:  "Presence of tags, trainees, instructor notes, and event annotations. Profile: " + profile.Name + ".",
 		},
 	}
 	total := 0
 	for _, criterion := range criteria {
-		total += criterion.Value
+		total += criterion.Value * profile.Weight(criterion.Name)
 	}
-	score := total / len(criteria)
+	score := int(math.Round(float64(total) / 100.0))
 	label := "needs_review"
 	switch {
 	case score >= 80:
@@ -667,14 +689,66 @@ func trainingAssessment(report model.RunReport) model.TrainingAssessment {
 	}
 }
 
-func replayCoverageScore(report model.RunReport) int {
+type assessmentProfileConfig struct {
+	Name          string
+	ActionTarget  int
+	ReplayTarget  int
+	ActionWeight  int
+	ReplayWeight  int
+	ContextWeight int
+}
+
+func (p assessmentProfileConfig) Weight(name string) int {
+	switch name {
+	case "training_actions":
+		return p.ActionWeight
+	case "replay_coverage":
+		return p.ReplayWeight
+	case "instructor_context":
+		return p.ContextWeight
+	default:
+		return 0
+	}
+}
+
+func assessmentProfile(name string) assessmentProfileConfig {
+	switch strings.TrimSpace(name) {
+	case "quick_review":
+		return assessmentProfileConfig{Name: "quick_review", ActionTarget: 3, ReplayTarget: 8, ActionWeight: 30, ReplayWeight: 30, ContextWeight: 40}
+	case "extended_review":
+		return assessmentProfileConfig{Name: "extended_review", ActionTarget: 10, ReplayTarget: 60, ActionWeight: 40, ReplayWeight: 35, ContextWeight: 25}
+	default:
+		return assessmentProfileConfig{Name: "standard", ActionTarget: 6, ReplayTarget: 20, ActionWeight: 34, ReplayWeight: 33, ContextWeight: 33}
+	}
+}
+
+func assessmentProfileForScenario(scenario model.Scenario) assessmentProfileConfig {
+	if scenario.AssessmentRules == nil {
+		return assessmentProfile(scenario.AssessmentProfile)
+	}
+	rules := *scenario.AssessmentRules
+	name := strings.TrimSpace(rules.Name)
+	if name == "" {
+		name = "custom_course_rules"
+	}
+	return assessmentProfileConfig{
+		Name:          name,
+		ActionTarget:  rules.ActionTarget,
+		ReplayTarget:  rules.ReplayTarget,
+		ActionWeight:  rules.ActionWeight,
+		ReplayWeight:  rules.ReplayWeight,
+		ContextWeight: rules.ContextWeight,
+	}
+}
+
+func replayCoverageScore(report model.RunReport, targetFrames int) int {
 	if report.ReplayMode != "snapshot" || report.SnapshotCoverage == nil {
 		return 25
 	}
-	if report.SnapshotCoverage.Count >= 20 {
+	if report.SnapshotCoverage.Count >= targetFrames {
 		return 100
 	}
-	return boundedScore(report.SnapshotCoverage.Count, 20)
+	return boundedScore(report.SnapshotCoverage.Count, targetFrames)
 }
 
 func instructorContextScore(report model.RunReport) int {
@@ -956,6 +1030,10 @@ func normalizeScenario(s model.Scenario) model.Scenario {
 			s.AllowedActions[i] = normalizeActionType(action)
 		}
 	}
+	s.AssessmentProfile = strings.TrimSpace(s.AssessmentProfile)
+	if s.AssessmentRules != nil {
+		s.AssessmentRules.Name = strings.TrimSpace(s.AssessmentRules.Name)
+	}
 	for i := range s.Tracks {
 		if s.Tracks[i].ID == "" {
 			s.Tracks[i].ID = uuid.NewString()
@@ -1055,6 +1133,14 @@ func ValidateScenario(s model.Scenario) error {
 	if s.InitialContacts < 0 {
 		details = append(details, "initial_contacts must be non-negative")
 	}
+	if s.AssessmentProfile != "" {
+		if _, ok := map[string]struct{}{"standard": {}, "quick_review": {}, "extended_review": {}}[s.AssessmentProfile]; !ok {
+			details = append(details, "assessment_profile must be one of standard, quick_review, or extended_review")
+		}
+	}
+	if s.AssessmentRules != nil {
+		details = append(details, validateAssessmentRules(*s.AssessmentRules)...)
+	}
 	if s.InitialContacts+len(s.Tracks) > 100 {
 		details = append(details, "scenario may seed at most 100 tracks")
 	}
@@ -1099,6 +1185,45 @@ func ValidateScenario(s model.Scenario) error {
 		return ValidationError{Details: details}
 	}
 	return nil
+}
+
+func validateAssessmentRules(rules model.AssessmentRules) []string {
+	var details []string
+	if strings.TrimSpace(rules.Name) != "" && unsafeAssessmentRuleText(rules.Name) {
+		details = append(details, "assessment_rules.name must preserve the training-record boundary")
+	}
+	if rules.ActionTarget < 1 || rules.ActionTarget > 1000 {
+		details = append(details, "assessment_rules.action_target must be between 1 and 1000")
+	}
+	if rules.ReplayTarget < 1 || rules.ReplayTarget > 1000000 {
+		details = append(details, "assessment_rules.replay_target must be between 1 and 1000000")
+	}
+	for _, item := range []struct {
+		name  string
+		value int
+	}{
+		{name: "action_weight", value: rules.ActionWeight},
+		{name: "replay_weight", value: rules.ReplayWeight},
+		{name: "context_weight", value: rules.ContextWeight},
+	} {
+		if item.value < 0 || item.value > 100 {
+			details = append(details, fmt.Sprintf("assessment_rules.%s must be between 0 and 100", item.name))
+		}
+	}
+	if rules.ActionWeight+rules.ReplayWeight+rules.ContextWeight != 100 {
+		details = append(details, "assessment_rules weights must sum to 100")
+	}
+	return details
+}
+
+func unsafeAssessmentRuleText(value string) bool {
+	value = strings.ToLower(value)
+	for _, term := range []string{"tactical", "engagement", "fire-control", "fire control", "weapon", "readiness", "kill"} {
+		if strings.Contains(value, term) {
+			return true
+		}
+	}
+	return false
 }
 
 func validLonLat(v model.Vec3) bool {

@@ -21,6 +21,7 @@ Useful local settings:
 
 ```powershell
 $env:SHIP_SIM_SCENARIO_DIR="scenarios"
+$env:SHIP_SIM_COURSE_TEMPLATE_DIR="course-templates"
 $env:SHIP_SIM_ALLOWED_ORIGINS="http://127.0.0.1:5173,http://localhost:5173"
 $env:SHIP_SIM_REQUEST_BODY_LIMIT="1048576"
 ```
@@ -29,7 +30,7 @@ Production mode must not run without authentication. For a simple demo or single
 
 Do not pass long-lived credentials through URLs. The backend rejects `access_token` as a normal authentication path. Browser report export must use `fetch` plus Blob download so `Authorization` stays in headers. Authenticated WebSocket connections must first call `POST /api/runs/{run_id}/ws-ticket` and then connect with the returned short-lived one-time `ticket` query parameter.
 
-For `SHIP_SIM_AUTH_MODE=proxy`, the reverse proxy must remove any client-supplied copy of `SHIP_SIM_AUTH_USER_HEADER` before setting the trusted value. Do not expose the app directly to the public internet in proxy-auth mode, because the app trusts that header after the proxy has authenticated the user.
+For `SHIP_SIM_AUTH_MODE=proxy`, the reverse proxy must remove any client-supplied copy of `SHIP_SIM_AUTH_USER_HEADER` and `SHIP_SIM_AUTH_ROLE_HEADER` before setting trusted values. Do not expose the app directly to the public internet in proxy-auth mode, because the app trusts those headers after the proxy has authenticated the user. Roles are `viewer`, `operator`, `instructor`, and `admin`; missing role headers default to `instructor`.
 
 All HTTP responses should keep the baseline security headers enabled: `Content-Security-Policy`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, and `X-Frame-Options: DENY`.
 
@@ -66,10 +67,12 @@ $env:SHIP_SIM_DATABASE_URL="postgres://user:password@localhost:5432/shipsim?sslm
 psql $env:SHIP_SIM_DATABASE_URL -f migrations/001_init.sql
 psql $env:SHIP_SIM_DATABASE_URL -f migrations/002_snapshot_frames.sql
 psql $env:SHIP_SIM_DATABASE_URL -f migrations/003_training_product.sql
+psql $env:SHIP_SIM_DATABASE_URL -f migrations/004_course_templates.sql
+psql $env:SHIP_SIM_DATABASE_URL -f migrations/005_metrics_history.sql
 go run ./cmd/sim-server
 ```
 
-PostgreSQL mode has a startup migration gate. The app requires `schema_migrations.name='ship_sim'` to be at the current version before it starts HTTP. Empty, v1, and v2 databases fail clearly instead of running in a half-migrated state.
+PostgreSQL mode has a startup migration gate. The app requires `schema_migrations.name='ship_sim'` to be at the current version before it starts HTTP. Empty, v1, v2, v3, and v4 databases fail clearly instead of running in a half-migrated state.
 
 Do not run destructive database operations against shared or production data without first taking a backup or using a documented preview/dry-run path. Retention pruning supports a preview API; use it before manual pruning.
 
@@ -109,7 +112,9 @@ npm run generate:types
 
 The source contract is `docs/openapi.json`; generated frontend API types are written to `web/src/generated/api-types.ts`. See `docs/api.md` for versioning and error-code policy.
 
-Training product workflow APIs support managed scenario upload/copy/enable/disable, run tags, trainees, instructor notes, event annotations, abstract training assessment, JSON/CSV/HTML/PDF report templates, and persisted audit logs. See `docs/training-product.md` before changing those workflows.
+Training product workflow APIs support managed scenario upload/copy/edit/enable/disable, course template list/create/update/scenario creation, run tags, trainees, instructor notes, event annotations, abstract training assessment, JSON/CSV/HTML/PDF report templates, replay anchors, archive export/upload, archive replay restore, and persisted audit logs. See `docs/training-product.md` before changing those workflows.
+
+Course templates in `course-templates/` are loaded at startup and validated by the Go test suite. Managed templates are stored through `migrations/004_course_templates.sql`; durable metrics trend samples are stored through `migrations/005_metrics_history.sql`. When adding a template, include `training_only`, an uploadable `scenario`, `expected_metadata`, `review_checklist`, and a simulator-only `safety_notice`.
 
 ## Unified Commands
 

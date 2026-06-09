@@ -30,10 +30,12 @@ COPY --from=backend-build /out/sim-server /app/sim-server
 COPY --from=web-build /src/web/dist /app/web
 COPY migrations/ /app/migrations/
 COPY scenarios/ /app/scenarios/
+COPY course-templates/ /app/course-templates/
 
 ENV SHIP_SIM_ADDR=:8080
 ENV SHIP_SIM_STATIC_DIR=/app/web
 ENV SHIP_SIM_SCENARIO_DIR=/app/scenarios
+ENV SHIP_SIM_COURSE_TEMPLATE_DIR=/app/course-templates
 
 USER shipsim
 EXPOSE 8080

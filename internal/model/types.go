@@ -43,20 +43,22 @@ type Zone struct {
 }
 
 type Scenario struct {
-	ID              string    `json:"id,omitempty"`
-	Name            string    `json:"name"`
-	Description     string    `json:"description,omitempty"`
-	Version         int       `json:"version,omitempty"`
-	Seed            int64     `json:"seed"`
-	TickHz          int       `json:"tick_hz"`
-	SnapshotHz      int       `json:"snapshot_hz"`
-	Ownship         Vec3      `json:"ownship"`
-	Sensors         []Sensor  `json:"sensors"`
-	Zones           []Zone    `json:"zones"`
-	InitialContacts int       `json:"initial_contacts"`
-	Tracks          []Track   `json:"tracks,omitempty"`
-	Contacts        []Contact `json:"contacts,omitempty"`
-	AllowedActions  []string  `json:"allowed_actions,omitempty"`
+	ID                string           `json:"id,omitempty"`
+	Name              string           `json:"name"`
+	Description       string           `json:"description,omitempty"`
+	Version           int              `json:"version,omitempty"`
+	Seed              int64            `json:"seed"`
+	TickHz            int              `json:"tick_hz"`
+	SnapshotHz        int              `json:"snapshot_hz"`
+	Ownship           Vec3             `json:"ownship"`
+	Sensors           []Sensor         `json:"sensors"`
+	Zones             []Zone           `json:"zones"`
+	InitialContacts   int              `json:"initial_contacts"`
+	AssessmentProfile string           `json:"assessment_profile,omitempty"`
+	AssessmentRules   *AssessmentRules `json:"assessment_rules,omitempty"`
+	Tracks            []Track          `json:"tracks,omitempty"`
+	Contacts          []Contact        `json:"contacts,omitempty"`
+	AllowedActions    []string         `json:"allowed_actions,omitempty"`
 }
 
 type Run struct {
@@ -143,6 +145,37 @@ type ScenarioRecord struct {
 	UpdatedAt time.Time
 }
 
+type CourseChecklistItem struct {
+	ID       string `json:"id"`
+	Label    string `json:"label"`
+	Evidence string `json:"evidence"`
+}
+
+type AssessmentRules struct {
+	Name          string `json:"name,omitempty"`
+	ActionTarget  int    `json:"action_target"`
+	ReplayTarget  int    `json:"replay_target"`
+	ActionWeight  int    `json:"action_weight"`
+	ReplayWeight  int    `json:"replay_weight"`
+	ContextWeight int    `json:"context_weight"`
+}
+
+type CourseTemplate struct {
+	ID               string                `json:"id"`
+	Name             string                `json:"name"`
+	Description      string                `json:"description,omitempty"`
+	TrainingOnly     bool                  `json:"training_only"`
+	Scenario         Scenario              `json:"scenario"`
+	ExpectedMetadata map[string]any        `json:"expected_metadata"`
+	ReviewChecklist  []CourseChecklistItem `json:"review_checklist"`
+	SafetyNotice     string                `json:"safety_notice"`
+	Source           string                `json:"source,omitempty"`
+	Enabled          bool                  `json:"enabled"`
+	CreatedBy        string                `json:"created_by,omitempty"`
+	CreatedAt        time.Time             `json:"created_at,omitempty"`
+	UpdatedAt        time.Time             `json:"updated_at,omitempty"`
+}
+
 type RunMetadata struct {
 	Tags            []string `json:"tags"`
 	Trainees        []string `json:"trainees"`
@@ -153,6 +186,30 @@ type RunMetadata struct {
 type StoreStatus struct {
 	Store            string `json:"store"`
 	MigrationVersion int    `json:"migration_version"`
+}
+
+type StoreDataSize struct {
+	Store      string `json:"store"`
+	TableBytes int64  `json:"table_bytes"`
+	IndexBytes int64  `json:"index_bytes"`
+	TotalBytes int64  `json:"total_bytes"`
+}
+
+type MetricsHistorySample struct {
+	SampledAt                  time.Time `json:"sampled_at"`
+	SnapshotFrames             int       `json:"snapshot_frames"`
+	EventCount                 int       `json:"event_count"`
+	TrackPointCount            int       `json:"track_point_count"`
+	ContactCount               int       `json:"contact_count"`
+	SnapshotCapacityPressure   float64   `json:"snapshot_capacity_pressure"`
+	EventCapacityPressure      float64   `json:"event_capacity_pressure"`
+	TrackPointCapacityPressure float64   `json:"track_point_capacity_pressure"`
+	SnapshotWriteAvgMS         float64   `json:"snapshot_write_avg_ms"`
+	SnapshotWriteMaxMS         float64   `json:"snapshot_write_max_ms"`
+	SnapshotWriteFailures      int64     `json:"snapshot_write_failures"`
+	DBTableBytes               int64     `json:"db_table_bytes"`
+	DBIndexBytes               int64     `json:"db_index_bytes"`
+	DBTotalBytes               int64     `json:"db_total_bytes"`
 }
 
 type RetentionPolicy struct {
@@ -178,6 +235,14 @@ type RetentionPreview struct {
 	TrackPointsMatched int64 `json:"track_points_matched"`
 	ContactsMatched    int64 `json:"contacts_matched"`
 	SnapshotsMatched   int64 `json:"snapshots_matched"`
+}
+
+type RunDataCounts struct {
+	RunID       string `json:"run_id"`
+	Events      int    `json:"events"`
+	TrackPoints int    `json:"track_points"`
+	Contacts    int    `json:"contacts"`
+	Snapshots   int    `json:"snapshots"`
 }
 
 type Contact struct {

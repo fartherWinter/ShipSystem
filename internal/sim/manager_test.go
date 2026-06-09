@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -149,6 +150,100 @@ func TestScenarioValidationRejectsUnsafeShape(t *testing.T) {
 	}
 	if len(validation.Details) == 0 {
 		t.Fatal("expected validation details")
+	}
+}
+
+func TestTrainingAssessmentProfilesChangeRecordCompletenessTargets(t *testing.T) {
+	baseReport := model.RunReport{
+		Run: model.Run{
+			Scenario: model.Scenario{AssessmentProfile: "quick_review"},
+		},
+		ReplayMode: "snapshot",
+		EventAudit: model.EventAuditSummary{EventCount: 3},
+		SnapshotCoverage: &model.SnapshotCoverage{
+			Count: 8,
+		},
+	}
+	quick := trainingAssessment(baseReport)
+	baseReport.Run.Scenario.AssessmentProfile = "extended_review"
+	extended := trainingAssessment(baseReport)
+
+	if quick.Score <= extended.Score {
+		t.Fatalf("expected quick_review to score higher than extended_review for short records, quick=%+v extended=%+v", quick, extended)
+	}
+	if !strings.Contains(quick.Criteria[0].Note, "quick_review") {
+		t.Fatalf("expected assessment note to name profile, got %+v", quick.Criteria)
+	}
+}
+
+func TestTrainingAssessmentUsesScenarioAssessmentRules(t *testing.T) {
+	baseReport := model.RunReport{
+		Run: model.Run{
+			Scenario: model.Scenario{
+				AssessmentProfile: "quick_review",
+				AssessmentRules: &model.AssessmentRules{
+					Name:          "course_record_rules",
+					ActionTarget:  6,
+					ReplayTarget:  20,
+					ActionWeight:  60,
+					ReplayWeight:  20,
+					ContextWeight: 20,
+				},
+			},
+		},
+		ReplayMode: "snapshot",
+		EventAudit: model.EventAuditSummary{EventCount: 3},
+		SnapshotCoverage: &model.SnapshotCoverage{
+			Count: 8,
+		},
+	}
+	custom := trainingAssessment(baseReport)
+	baseReport.Run.Scenario.AssessmentRules = nil
+	profile := trainingAssessment(baseReport)
+
+	if custom.Score >= profile.Score {
+		t.Fatalf("expected stricter custom rules to score lower than quick profile, custom=%+v profile=%+v", custom, profile)
+	}
+	if !strings.Contains(custom.Criteria[0].Note, "course_record_rules") {
+		t.Fatalf("expected assessment note to name custom rules, got %+v", custom.Criteria)
+	}
+}
+
+func TestScenarioValidationRejectsUnknownAssessmentProfile(t *testing.T) {
+	manager := NewManager(store.NewMemory(), slog.Default())
+	scenario := DefaultScenario()
+	scenario.AssessmentProfile = "tactical_score"
+	_, err := manager.CreateRun(context.Background(), "bad-profile", scenario)
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	var validation ValidationError
+	if !errors.As(err, &validation) {
+		t.Fatalf("expected ValidationError, got %T", err)
+	}
+}
+
+func TestScenarioValidationRejectsUnsafeAssessmentRules(t *testing.T) {
+	manager := NewManager(store.NewMemory(), slog.Default())
+	scenario := DefaultScenario()
+	scenario.AssessmentRules = &model.AssessmentRules{
+		Name:          "tactical readiness",
+		ActionTarget:  3,
+		ReplayTarget:  8,
+		ActionWeight:  30,
+		ReplayWeight:  30,
+		ContextWeight: 20,
+	}
+	_, err := manager.CreateRun(context.Background(), "bad-rules", scenario)
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	var validation ValidationError
+	if !errors.As(err, &validation) {
+		t.Fatalf("expected ValidationError, got %T", err)
+	}
+	if len(validation.Details) < 2 {
+		t.Fatalf("expected unsafe name and weight validation details, got %+v", validation.Details)
 	}
 }
 

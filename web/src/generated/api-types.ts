@@ -50,6 +50,15 @@ export type Track = {
   "status": string;
 };
 
+export type AssessmentRules = {
+  "name"?: string;
+  "action_target": number;
+  "replay_target": number;
+  "action_weight": number;
+  "replay_weight": number;
+  "context_weight": number;
+};
+
 export type Scenario = {
   "id"?: string;
   "name": string;
@@ -62,6 +71,8 @@ export type Scenario = {
   "sensors": Sensor[];
   "zones": Zone[];
   "initial_contacts": number;
+  "assessment_profile"?: "standard" | "quick_review" | "extended_review";
+  "assessment_rules"?: AssessmentRules;
   "tracks"?: Track[];
   "contacts"?: Contact[];
   "allowed_actions"?: TrainingAction[];
@@ -73,6 +84,30 @@ export type ScenarioSummary = {
   "description"?: string;
   "version"?: number;
   "source": string;
+  "enabled": boolean;
+  "created_by"?: string;
+  "created_at"?: string;
+  "updated_at"?: string;
+};
+
+export type CourseChecklistItem = {
+  "id": string;
+  "label": string;
+  "evidence": string;
+};
+
+export type CourseTemplate = {
+  "id": string;
+  "name": string;
+  "description"?: string;
+  "training_only": boolean;
+  "scenario": Scenario;
+  "expected_metadata": {
+  [key: string]: unknown;
+};
+  "review_checklist": CourseChecklistItem[];
+  "safety_notice": string;
+  "source"?: string;
   "enabled": boolean;
   "created_by"?: string;
   "created_at"?: string;
@@ -328,13 +363,57 @@ export type ReadyResponse = {
   "migration_version": number;
 };
 
+export type SessionResponse = {
+  "auth_mode": "off" | "token" | "proxy";
+  "authenticated": boolean;
+  "user_id"?: string;
+  "role": "viewer" | "operator" | "instructor" | "admin";
+  "role_source"?: "header" | "map" | "default" | "compat_default" | "token" | "local";
+  "permissions": {
+  [key: string]: boolean;
+};
+  "safety_notice": string;
+};
+
 export type StoreStatus = {
   "store": string;
   "migration_version": number;
 };
 
 export type MetricsResponse = {
+  "sampled_at"?: string;
+  "snapshot_frames"?: number;
+  "event_count"?: number;
+  "track_point_count"?: number;
+  "contact_count"?: number;
+  "snapshot_capacity_pressure"?: number;
+  "event_capacity_pressure"?: number;
+  "track_point_capacity_pressure"?: number;
+  "snapshot_write_avg_ms"?: number;
+  "snapshot_write_max_ms"?: number;
+  "snapshot_write_failures"?: number;
+  "db_table_bytes"?: number;
+  "db_index_bytes"?: number;
+  "db_total_bytes"?: number;
+  "db_size_error"?: string;
   [key: string]: unknown;
+};
+
+export type MetricsHistorySample = {
+  "sampled_at": string;
+  "snapshot_frames": number;
+  "event_count": number;
+  "track_point_count": number;
+  "contact_count": number;
+  "snapshot_capacity_pressure": number;
+  "event_capacity_pressure": number;
+  "track_point_capacity_pressure": number;
+  "snapshot_write_avg_ms": number;
+  "snapshot_write_max_ms": number;
+  "snapshot_write_failures": number;
+  "db_table_bytes": number;
+  "db_index_bytes": number;
+  "db_total_bytes": number;
 };
 
 export type ApiError = {

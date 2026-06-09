@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { trackHistoryToFeatureCollection, tracksToFeatureCollection, zonesToFeatureCollection } from "./mapData";
-import type { Track, Zone } from "./types";
+import {
+  sensorsToFeatureCollection,
+  trackHistoryToFeatureCollection,
+  tracksToFeatureCollection,
+  zoneDraftPointsToFeatureCollection,
+  zoneDraftToFeatureCollection,
+  zoneVerticesToFeatureCollection,
+  zonesToFeatureCollection
+} from "./mapData";
+import type { Sensor, Track, Vec3, Zone } from "./types";
 
 describe("map data transforms", () => {
   it("converts tracks into point features with display properties", () => {
@@ -43,6 +51,61 @@ describe("map data transforms", () => {
     const ring = collection.features[0].geometry.coordinates[0];
 
     expect(ring[0]).toEqual(ring[ring.length - 1]);
+  });
+
+  it("converts simulated sensors into point features", () => {
+    const sensors: Sensor[] = [
+      {
+        id: "sensor-1",
+        name: "Simulated Sensor",
+        kind: "simulated_sensor",
+        position: { lon: 121.5, lat: 31.2, alt_m: 0 }
+      }
+    ];
+
+    const collection = sensorsToFeatureCollection(sensors);
+
+    expect(collection.features).toHaveLength(1);
+    expect(collection.features[0].geometry.coordinates).toEqual([121.5, 31.2]);
+    expect(collection.features[0].properties.name).toBe("Simulated Sensor");
+  });
+
+  it("builds scenario zone draft line and point features", () => {
+    const points: Vec3[] = [
+      { lon: 1, lat: 2, alt_m: 0 },
+      { lon: 3, lat: 4, alt_m: 0 },
+      { lon: 5, lat: 6, alt_m: 0 }
+    ];
+
+    expect(zoneDraftToFeatureCollection(points).features[0].geometry.coordinates).toEqual([
+      [1, 2],
+      [3, 4],
+      [5, 6]
+    ]);
+    expect(zoneDraftPointsToFeatureCollection(points).features.map((feature) => feature.properties.order)).toEqual([1, 2, 3]);
+  });
+
+  it("builds editable scenario zone vertex handles", () => {
+    const zones: Zone[] = [
+      {
+        id: "area",
+        name: "Training Area",
+        kind: "exercise_boundary",
+        polygon: [
+          { lon: 1, lat: 1, alt_m: 0 },
+          { lon: 2, lat: 1, alt_m: 0 },
+          { lon: 2, lat: 2, alt_m: 0 }
+        ]
+      }
+    ];
+
+    const collection = zoneVerticesToFeatureCollection(zones, "area", 1);
+
+    expect(collection.features).toHaveLength(3);
+    expect(collection.features[1].geometry.coordinates).toEqual([2, 1]);
+    expect(collection.features[1].properties.zone_id).toBe("area");
+    expect(collection.features[1].properties.vertex_index).toBe(1);
+    expect(collection.features[1].properties.selected).toBe(1);
   });
 
   it("builds a selected track history line when enough points exist", () => {

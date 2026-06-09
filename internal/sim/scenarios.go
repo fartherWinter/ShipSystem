@@ -314,6 +314,10 @@ func cloneScenario(s model.Scenario) model.Scenario {
 	out.Tracks = append([]model.Track(nil), s.Tracks...)
 	out.Contacts = append([]model.Contact(nil), s.Contacts...)
 	out.AllowedActions = append([]string(nil), s.AllowedActions...)
+	if s.AssessmentRules != nil {
+		rules := *s.AssessmentRules
+		out.AssessmentRules = &rules
+	}
 	return out
 }
 

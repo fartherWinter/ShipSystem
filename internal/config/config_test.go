@@ -62,6 +62,33 @@ func TestRetentionCapacityEnvOverrides(t *testing.T) {
 	}
 }
 
+func TestAuthRoleHeaderEnvOverride(t *testing.T) {
+	t.Setenv("SHIP_SIM_AUTH_ROLE_HEADER", "X-Training-Role")
+	t.Setenv("SHIP_SIM_AUTH_DEFAULT_ROLE", "viewer")
+	t.Setenv("SHIP_SIM_AUTH_ROLE_MAP", "alice=instructor,bob:operator")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if cfg.AuthRoleHeader != "X-Training-Role" {
+		t.Fatalf("unexpected role header: %q", cfg.AuthRoleHeader)
+	}
+	if cfg.AuthDefaultRole != "viewer" || cfg.AuthRoleMap["alice"] != "instructor" || cfg.AuthRoleMap["bob"] != "operator" {
+		t.Fatalf("unexpected role assignment config: %+v", cfg)
+	}
+}
+
+func TestCourseTemplateDirEnvOverride(t *testing.T) {
+	t.Setenv("SHIP_SIM_COURSE_TEMPLATE_DIR", "custom-course-templates")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if cfg.CourseTemplateDir != "custom-course-templates" {
+		t.Fatalf("unexpected course template dir: %q", cfg.CourseTemplateDir)
+	}
+}
+
 func TestInvalidDurationEnvFails(t *testing.T) {
 	t.Setenv("SHIP_SIM_HTTP_READ_TIMEOUT", "soon")
 	if _, err := Load(); err == nil {
@@ -94,5 +121,15 @@ func TestTimeoutsMustBePositive(t *testing.T) {
 	cfg.MaxSnapshotsPerRun = 999
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("expected low snapshot capacity to fail")
+	}
+	cfg = Default()
+	cfg.AuthDefaultRole = "captain"
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected invalid default role to fail")
+	}
+	cfg = Default()
+	cfg.AuthRoleMap = map[string]string{"alice": "captain"}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected invalid mapped role to fail")
 	}
 }

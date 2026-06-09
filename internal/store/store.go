@@ -10,6 +10,9 @@ import (
 type Store interface {
 	Name() string
 	Ready(context.Context) (model.StoreStatus, error)
+	DataSize(context.Context) (model.StoreDataSize, error)
+	SaveMetricsHistorySample(context.Context, model.MetricsHistorySample) error
+	ListMetricsHistorySamples(context.Context, int) ([]model.MetricsHistorySample, error)
 	SaveRun(context.Context, model.Run) error
 	GetRun(context.Context, string) (model.Run, error)
 	GetRunForOwner(context.Context, string, string) (model.Run, error)
@@ -22,6 +25,7 @@ type Store interface {
 	NearestSnapshot(context.Context, string, time.Time) (model.SnapshotFrame, error)
 	LatestSnapshot(context.Context, string) (model.SnapshotFrame, error)
 	SnapshotRange(context.Context, string) (model.SnapshotRange, bool, error)
+	RunDataCounts(context.Context, string) (model.RunDataCounts, error)
 	ListTracks(context.Context, string) ([]model.Track, error)
 	ListTrackPoints(context.Context, string, model.TrackPointQuery) ([]model.TrackPoint, error)
 	ListZones(context.Context, string) ([]model.Zone, error)
@@ -30,6 +34,9 @@ type Store interface {
 	GetScenarioRecord(context.Context, string) (model.ScenarioRecord, error)
 	SaveScenario(context.Context, model.ScenarioRecord) (model.ScenarioSummary, error)
 	SetScenarioEnabled(context.Context, string, bool, string) (model.ScenarioSummary, error)
+	ListCourseTemplates(context.Context) ([]model.CourseTemplate, error)
+	GetCourseTemplate(context.Context, string) (model.CourseTemplate, error)
+	SaveCourseTemplate(context.Context, model.CourseTemplate) (model.CourseTemplate, error)
 	SaveEventAnnotation(context.Context, model.EventAnnotation) (model.EventAnnotation, error)
 	ListEventAnnotations(context.Context, string) ([]model.EventAnnotation, error)
 	SaveAuditLog(context.Context, model.AuditLog) error

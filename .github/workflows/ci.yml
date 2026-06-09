@@ -67,12 +67,29 @@ jobs:
       - name: npm audit
         run: npm audit --audit-level=high --registry=https://registry.npmjs.org
 
+  postgres:
+    name: postgres integration
+    runs-on: ubuntu-latest
+    needs:
+      - backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.4"
+          cache: true
+
+      - name: Postgres store contract
+        run: make postgres-test
+
   docker:
     name: docker
     runs-on: ubuntu-latest
     needs:
       - backend
       - frontend
+      - postgres
     steps:
       - uses: actions/checkout@v4
 

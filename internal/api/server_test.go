@@ -177,7 +177,13 @@ func TestReadinessAndScenariosAPI(t *testing.T) {
 }
 
 func TestTrainingProductWorkflowAPI(t *testing.T) {
-	server := NewServer(sim.NewManager(store.NewMemory(), slog.Default()), slog.Default())
+	manager := sim.NewManager(store.NewMemory(), slog.Default())
+	fileTemplateScenario := sim.DefaultScenario()
+	fileTemplateScenario.Name = "file-template-scenario"
+	if err := manager.RegisterCourseTemplate("file-course", sampleCourseTemplate("file-course", "File Course", fileTemplateScenario), "file"); err != nil {
+		t.Fatalf("register file course template: %v", err)
+	}
+	server := NewServer(manager, slog.Default())
 	ts := httptest.NewServer(server.Routes())
 	defer ts.Close()
 
@@ -203,6 +209,87 @@ func TestTrainingProductWorkflowAPI(t *testing.T) {
 	}
 	if !created.Enabled || created.ID == "" || created.Source != "database" {
 		t.Fatalf("unexpected created scenario: %+v", created)
+	}
+
+	res, err = http.Get(ts.URL + "/api/course-templates")
+	if err != nil {
+		t.Fatalf("list course templates request: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("expected course template list 200, got %d", res.StatusCode)
+	}
+	var templates []model.CourseTemplate
+	if err := json.NewDecoder(res.Body).Decode(&templates); err != nil {
+		t.Fatalf("decode course templates: %v", err)
+	}
+	if len(templates) != 1 || templates[0].ID != "file-course" || templates[0].Source != "file" {
+		t.Fatalf("expected registered file course template, got %+v", templates)
+	}
+
+	courseScenario := sim.DefaultScenario()
+	courseScenario.ID = ""
+	courseScenario.Name = "managed-course-scenario"
+	courseBody, err := json.Marshal(sampleCourseTemplate("managed-course", "Managed Course", courseScenario))
+	if err != nil {
+		t.Fatalf("marshal course template: %v", err)
+	}
+	res, err = http.Post(ts.URL+"/api/course-templates", "application/json", bytes.NewReader(courseBody))
+	if err != nil {
+		t.Fatalf("create course template request: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("expected course template create 201, got %d", res.StatusCode)
+	}
+	var managedTemplate model.CourseTemplate
+	if err := json.NewDecoder(res.Body).Decode(&managedTemplate); err != nil {
+		t.Fatalf("decode managed course template: %v", err)
+	}
+	if managedTemplate.ID != "managed-course" || managedTemplate.Source != "database" || !managedTemplate.TrainingOnly {
+		t.Fatalf("unexpected managed course template: %+v", managedTemplate)
+	}
+
+	managedTemplate.Description = "Updated managed course template."
+	updateBody, err := json.Marshal(managedTemplate)
+	if err != nil {
+		t.Fatalf("marshal updated course template: %v", err)
+	}
+	updateReq, err := http.NewRequest(http.MethodPut, ts.URL+"/api/course-templates/"+managedTemplate.ID, bytes.NewReader(updateBody))
+	if err != nil {
+		t.Fatalf("new course template update request: %v", err)
+	}
+	updateReq.Header.Set("Content-Type", "application/json")
+	res, err = http.DefaultClient.Do(updateReq)
+	if err != nil {
+		t.Fatalf("update course template request: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("expected course template update 200, got %d", res.StatusCode)
+	}
+	var updatedTemplate model.CourseTemplate
+	if err := json.NewDecoder(res.Body).Decode(&updatedTemplate); err != nil {
+		t.Fatalf("decode updated course template: %v", err)
+	}
+	if updatedTemplate.Description != "Updated managed course template." {
+		t.Fatalf("expected updated course template description, got %+v", updatedTemplate)
+	}
+
+	res, err = http.Post(ts.URL+"/api/course-templates/"+managedTemplate.ID+"/scenario", "application/json", nil)
+	if err != nil {
+		t.Fatalf("create scenario from course template request: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("expected course template scenario 201, got %d", res.StatusCode)
+	}
+	var templatedScenario model.ScenarioSummary
+	if err := json.NewDecoder(res.Body).Decode(&templatedScenario); err != nil {
+		t.Fatalf("decode templated scenario: %v", err)
+	}
+	if templatedScenario.Source != "database" || templatedScenario.Name != courseScenario.Name {
+		t.Fatalf("unexpected templated scenario: %+v", templatedScenario)
 	}
 
 	copyBody := bytes.NewBufferString(`{"name":"stage-9-training-scenario-copy"}`)
@@ -432,6 +519,134 @@ func TestTokenAuthProtectsAPIAndWebSocket(t *testing.T) {
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("expected authenticated 200, got %d", res.StatusCode)
+	}
+}
+
+func TestSessionAPIReportsLocalPermissions(t *testing.T) {
+	server := NewServer(sim.NewManager(store.NewMemory(), slog.Default()), slog.Default())
+	ts := httptest.NewServer(server.Routes())
+	defer ts.Close()
+
+	res, err := http.Get(ts.URL + "/api/session")
+	if err != nil {
+		t.Fatalf("session request: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("expected session 200, got %d", res.StatusCode)
+	}
+	var session sessionResponse
+	if err := json.NewDecoder(res.Body).Decode(&session); err != nil {
+		t.Fatalf("decode session: %v", err)
+	}
+	if session.AuthMode != config.AuthOff || !session.Authenticated || session.UserID != "local" || session.Role != roleInstructor {
+		t.Fatalf("unexpected local session: %+v", session)
+	}
+	if session.RoleSource != "local" {
+		t.Fatalf("expected local role source, got %q", session.RoleSource)
+	}
+	if !session.Permissions["manage_scenarios"] || !session.Permissions["create_runs"] || session.SafetyNotice == "" {
+		t.Fatalf("expected local instructor permissions and notice, got %+v", session)
+	}
+}
+
+func TestSessionAPIReportsProxyRolePermissions(t *testing.T) {
+	cfg := config.Default()
+	cfg.AuthMode = config.AuthProxy
+	cfg.AuthUserHeader = "X-Test-User"
+	cfg.AuthRoleHeader = "X-Test-Role"
+	server := NewServerWithConfig(sim.NewManager(store.NewMemory(), slog.Default()), slog.Default(), cfg)
+	ts := httptest.NewServer(server.Routes())
+	defer ts.Close()
+
+	res, err := http.Get(ts.URL + "/api/session")
+	if err != nil {
+		t.Fatalf("unauthenticated session request: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected unauthenticated session 401, got %d", res.StatusCode)
+	}
+
+	req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/session", nil)
+	if err != nil {
+		t.Fatalf("new proxy session request: %v", err)
+	}
+	req.Header.Set("X-Test-User", "viewer-a")
+	req.Header.Set("X-Test-Role", "viewer")
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("proxy session request: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("expected proxy session 200, got %d", res.StatusCode)
+	}
+	var session sessionResponse
+	if err := json.NewDecoder(res.Body).Decode(&session); err != nil {
+		t.Fatalf("decode proxy session: %v", err)
+	}
+	if session.AuthMode != config.AuthProxy || !session.Authenticated || session.UserID != "viewer-a" || session.Role != roleViewer {
+		t.Fatalf("unexpected proxy session: %+v", session)
+	}
+	if session.RoleSource != "header" {
+		t.Fatalf("expected header role source, got %q", session.RoleSource)
+	}
+	if session.Permissions["create_runs"] || session.Permissions["manage_scenarios"] || !session.Permissions["view_runs"] || !session.Permissions["request_websocket_ticket"] {
+		t.Fatalf("unexpected viewer permissions: %+v", session.Permissions)
+	}
+}
+
+func TestSessionAPIReportsProxyRoleMapAndDefault(t *testing.T) {
+	cfg := config.Default()
+	cfg.AuthMode = config.AuthProxy
+	cfg.AuthUserHeader = "X-Test-User"
+	cfg.AuthRoleHeader = "X-Test-Role"
+	cfg.AuthDefaultRole = roleViewer
+	cfg.AuthRoleMap = map[string]string{"operator-a": roleOperator}
+	server := NewServerWithConfig(sim.NewManager(store.NewMemory(), slog.Default()), slog.Default(), cfg)
+	ts := httptest.NewServer(server.Routes())
+	defer ts.Close()
+
+	req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/session", nil)
+	if err != nil {
+		t.Fatalf("new mapped proxy request: %v", err)
+	}
+	req.Header.Set("X-Test-User", "operator-a")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("mapped proxy session request: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("expected mapped proxy session 200, got %d", res.StatusCode)
+	}
+	var session sessionResponse
+	if err := json.NewDecoder(res.Body).Decode(&session); err != nil {
+		t.Fatalf("decode mapped proxy session: %v", err)
+	}
+	if session.Role != roleOperator || session.RoleSource != "map" || !session.Permissions["create_runs"] || session.Permissions["manage_scenarios"] {
+		t.Fatalf("unexpected mapped proxy session: %+v", session)
+	}
+
+	req, err = http.NewRequest(http.MethodGet, ts.URL+"/api/session", nil)
+	if err != nil {
+		t.Fatalf("new default proxy request: %v", err)
+	}
+	req.Header.Set("X-Test-User", "viewer-default")
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("default proxy session request: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("expected default proxy session 200, got %d", res.StatusCode)
+	}
+	if err := json.NewDecoder(res.Body).Decode(&session); err != nil {
+		t.Fatalf("decode default proxy session: %v", err)
+	}
+	if session.Role != roleViewer || session.RoleSource != "default" || session.Permissions["create_runs"] {
+		t.Fatalf("unexpected default proxy session: %+v", session)
 	}
 }
 
@@ -690,11 +905,22 @@ func TestSnapshotsAndReportAPI(t *testing.T) {
 		t.Fatalf("decode metrics: %v", err)
 	}
 	for _, key := range []string{
+		"sampled_at",
 		"active_runs",
 		"listed_runs",
 		"websocket_connections",
 		"snapshot_frames",
 		"snapshot_frames_by_run",
+		"event_count",
+		"event_count_by_run",
+		"event_capacity_pressure",
+		"event_capacity_pressure_by_run",
+		"track_point_count",
+		"track_point_count_by_run",
+		"track_point_capacity_pressure",
+		"track_point_capacity_pressure_by_run",
+		"contact_count",
+		"contact_count_by_run",
 		"snapshot_write_count",
 		"snapshot_write_failures",
 		"snapshot_write_last_ms",
@@ -709,6 +935,10 @@ func TestSnapshotsAndReportAPI(t *testing.T) {
 		"db_ready",
 		"db_store",
 		"db_migration_version",
+		"db_table_bytes",
+		"db_index_bytes",
+		"db_total_bytes",
+		"db_size_error",
 		"sample_limit",
 	} {
 		if _, ok := metrics[key]; !ok {
@@ -720,6 +950,37 @@ func TestSnapshotsAndReportAPI(t *testing.T) {
 	}
 	if framesByRun, ok := metrics["snapshot_frames_by_run"].(map[string]any); !ok || framesByRun[run.ID].(float64) == 0 {
 		t.Fatalf("expected per-run snapshot metrics for %s, got %+v", run.ID, metrics["snapshot_frames_by_run"])
+	}
+	if metrics["event_count"].(float64) == 0 || metrics["track_point_count"].(float64) == 0 || metrics["contact_count"].(float64) == 0 {
+		t.Fatalf("expected event/track/contact metrics to be nonzero, got %+v", metrics)
+	}
+	if eventsByRun, ok := metrics["event_count_by_run"].(map[string]any); !ok || eventsByRun[run.ID].(float64) == 0 {
+		t.Fatalf("expected per-run event metrics for %s, got %+v", run.ID, metrics["event_count_by_run"])
+	}
+	if pointsByRun, ok := metrics["track_point_count_by_run"].(map[string]any); !ok || pointsByRun[run.ID].(float64) == 0 {
+		t.Fatalf("expected per-run track point metrics for %s, got %+v", run.ID, metrics["track_point_count_by_run"])
+	}
+	if contactsByRun, ok := metrics["contact_count_by_run"].(map[string]any); !ok || contactsByRun[run.ID].(float64) == 0 {
+		t.Fatalf("expected per-run contact metrics for %s, got %+v", run.ID, metrics["contact_count_by_run"])
+	}
+	if metrics["db_total_bytes"].(float64) < metrics["db_table_bytes"].(float64) {
+		t.Fatalf("expected total bytes to include table bytes, got %+v", metrics)
+	}
+
+	res, err = http.Get(ts.URL + "/metrics/history?limit=1")
+	if err != nil {
+		t.Fatalf("metrics history request: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("expected metrics history 200, got %d", res.StatusCode)
+	}
+	var history []model.MetricsHistorySample
+	if err := json.NewDecoder(res.Body).Decode(&history); err != nil {
+		t.Fatalf("decode metrics history: %v", err)
+	}
+	if len(history) != 1 || history[0].SnapshotFrames == 0 || history[0].EventCount == 0 || history[0].SampledAt.IsZero() {
+		t.Fatalf("unexpected metrics history: %+v", history)
 	}
 
 	res, err = http.Get(ts.URL + "/metrics/prometheus")
@@ -741,10 +1002,18 @@ func TestSnapshotsAndReportAPI(t *testing.T) {
 		"ship_sim_http_requests_total",
 		"ship_sim_http_request_errors_total",
 		"ship_sim_websocket_connections",
+		"ship_sim_events_total",
+		"ship_sim_track_points_total",
+		"ship_sim_contacts_total",
+		"ship_sim_event_capacity_pressure",
+		"ship_sim_track_point_capacity_pressure",
 		"ship_sim_snapshot_writes_total",
 		"ship_sim_snapshot_write_failures_total",
 		"ship_sim_engines_total",
 		"ship_sim_db_ready",
+		"ship_sim_db_table_bytes",
+		"ship_sim_db_index_bytes",
+		"ship_sim_db_total_bytes",
 	} {
 		if !strings.Contains(string(prometheusBody), metric) {
 			t.Fatalf("expected prometheus metric %q in %s", metric, string(prometheusBody))
@@ -1081,6 +1350,120 @@ func TestProxyUserOwnerIsolation(t *testing.T) {
 	}
 }
 
+func TestProxyRolesGateMutations(t *testing.T) {
+	manager := sim.NewManager(store.NewMemory(), slog.Default())
+	cfg := config.Default()
+	cfg.AuthMode = config.AuthProxy
+	cfg.AuthUserHeader = "X-Test-User"
+	cfg.AuthRoleHeader = "X-Test-Role"
+	server := NewServerWithConfig(manager, slog.Default(), cfg)
+	ts := httptest.NewServer(server.Routes())
+	defer ts.Close()
+
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/api/runs", bytes.NewBufferString(`{}`))
+	if err != nil {
+		t.Fatalf("new viewer create request: %v", err)
+	}
+	req.Header.Set("X-Test-User", "viewer-a")
+	req.Header.Set("X-Test-Role", "viewer")
+	req.Header.Set("Content-Type", "application/json")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("viewer create run: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected viewer create run 403, got %d", res.StatusCode)
+	}
+
+	req, err = http.NewRequest(http.MethodPost, ts.URL+"/api/runs", bytes.NewBufferString(`{}`))
+	if err != nil {
+		t.Fatalf("new operator create request: %v", err)
+	}
+	req.Header.Set("X-Test-User", "operator-a")
+	req.Header.Set("X-Test-Role", "operator")
+	req.Header.Set("Content-Type", "application/json")
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("operator create run: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("expected operator create run 201, got %d", res.StatusCode)
+	}
+	var run model.Run
+	if err := json.NewDecoder(res.Body).Decode(&run); err != nil {
+		t.Fatalf("decode operator run: %v", err)
+	}
+
+	req, err = http.NewRequest(http.MethodPost, ts.URL+"/api/scenarios", bytes.NewBufferString(`{}`))
+	if err != nil {
+		t.Fatalf("new operator scenario request: %v", err)
+	}
+	req.Header.Set("X-Test-User", "operator-a")
+	req.Header.Set("X-Test-Role", "operator")
+	req.Header.Set("Content-Type", "application/json")
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("operator create scenario: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected operator create scenario 403, got %d", res.StatusCode)
+	}
+
+	courseTemplateBody, err := json.Marshal(sampleCourseTemplate("role-course", "Role Course", run.Scenario))
+	if err != nil {
+		t.Fatalf("marshal course template: %v", err)
+	}
+	req, err = http.NewRequest(http.MethodPost, ts.URL+"/api/course-templates", bytes.NewReader(courseTemplateBody))
+	if err != nil {
+		t.Fatalf("new operator course template request: %v", err)
+	}
+	req.Header.Set("X-Test-User", "operator-a")
+	req.Header.Set("X-Test-Role", "operator")
+	req.Header.Set("Content-Type", "application/json")
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("operator create course template: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected operator create course template 403, got %d", res.StatusCode)
+	}
+
+	req, err = http.NewRequest(http.MethodPost, ts.URL+"/api/course-templates", bytes.NewReader(courseTemplateBody))
+	if err != nil {
+		t.Fatalf("new instructor course template request: %v", err)
+	}
+	req.Header.Set("X-Test-User", "instructor-a")
+	req.Header.Set("X-Test-Role", "instructor")
+	req.Header.Set("Content-Type", "application/json")
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("instructor create course template: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("expected instructor create course template 201, got %d", res.StatusCode)
+	}
+
+	req, err = http.NewRequest(http.MethodPost, ts.URL+"/api/runs/"+run.ID+"/start", nil)
+	if err != nil {
+		t.Fatalf("new operator start request: %v", err)
+	}
+	req.Header.Set("X-Test-User", "operator-a")
+	req.Header.Set("X-Test-Role", "operator")
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("operator start run: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("expected operator start run 200, got %d", res.StatusCode)
+	}
+}
+
 func TestAuthenticatedWebSocketUsesOneTimeTicket(t *testing.T) {
 	cfg := config.Default()
 	cfg.AuthMode = config.AuthToken
@@ -1268,6 +1651,26 @@ func hasAuditAction(logs []model.AuditLog, action string) bool {
 		}
 	}
 	return false
+}
+
+func sampleCourseTemplate(id, name string, scenario model.Scenario) model.CourseTemplate {
+	return model.CourseTemplate{
+		ID:           id,
+		Name:         name,
+		Description:  name + " training course template.",
+		TrainingOnly: true,
+		Scenario:     scenario,
+		ExpectedMetadata: map[string]any{
+			"tags":                      []any{"course"},
+			"trainees_required":         true,
+			"instructor_notes_required": true,
+		},
+		ReviewChecklist: []model.CourseChecklistItem{
+			{ID: "record-complete", Label: "Training record is complete.", Evidence: "Report assessment and metadata are present."},
+		},
+		SafetyNotice: model.SafetyNotice,
+		Enabled:      true,
+	}
 }
 
 func minInt(a, b int) int {

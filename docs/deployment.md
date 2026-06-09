@@ -46,7 +46,11 @@ Production mode must not run with `SHIP_SIM_AUTH_MODE=off`.
 
 Token auth is acceptable for demos and simple single-user deployments. It is not a multi-user production identity system. For multi-user production deployments, put ShipSystem behind an authentication proxy and set `SHIP_SIM_AUTH_MODE=proxy`.
 
-In proxy-auth mode, the reverse proxy must strip any incoming `SHIP_SIM_AUTH_USER_HEADER` value before setting the trusted authenticated identity. Do not expose the app directly to the public internet in proxy-auth mode.
+In proxy-auth mode, the reverse proxy must strip any incoming `SHIP_SIM_AUTH_USER_HEADER` and `SHIP_SIM_AUTH_ROLE_HEADER` values before setting the trusted authenticated identity and role. Do not expose the app directly to the public internet in proxy-auth mode.
+
+Proxy roles are `viewer`, `operator`, `instructor`, and `admin`. Viewers are read-only except for WebSocket ticket creation, operators can run exercises and annotate records, and instructors/admins can manage scenarios, course templates, and retention. Missing role headers default to `instructor` for compatibility with existing proxy deployments.
+
+`GET /api/session` exposes the trusted proxy identity, role, and descriptive permission flags to the console Access panel. The reverse proxy remains responsible for assigning users and roles; ShipSystem still enforces every mutation on the backend.
 
 Long-lived credentials must stay out of URLs. Report downloads use authenticated `fetch` requests. WebSockets use a short-lived one-time ticket from `POST /api/runs/{run_id}/ws-ticket`.
 
@@ -79,9 +83,9 @@ If final persistence fails, the process logs the run id and exits non-zero. This
 
 ## Database Safety
 
-Apply migrations before using PostgreSQL mode. The app refuses to start with PostgreSQL unless `schema_migrations` reports the current required version. Empty databases are treated as version `0`, a database with only `migrations/001_init.sql` is version `1`, and a database with migrations through `002_snapshot_frames.sql` is version `2`.
+Apply migrations before using PostgreSQL mode. The app refuses to start with PostgreSQL unless `schema_migrations` reports the current required version. Empty databases are treated as version `0`, a database with only `migrations/001_init.sql` is version `1`, a database with migrations through `002_snapshot_frames.sql` is version `2`, a database with migrations through `003_training_product.sql` is version `3`, and a database with migrations through `004_course_templates.sql` is version `4`.
 
-Apply `migrations/003_training_product.sql` before deploying the training product workflow to PostgreSQL. It is additive and stores managed scenarios, run metadata, event annotations, and audit logs. Take a backup or platform snapshot before applying migrations to shared, staging, or production data.
+Apply `migrations/003_training_product.sql`, `migrations/004_course_templates.sql`, and `migrations/005_metrics_history.sql` before deploying the training product workflow to PostgreSQL. They are additive and store managed scenarios, run metadata, event annotations, audit logs, managed course templates, and metrics trend samples. Take a backup or platform snapshot before applying migrations to shared, staging, or production data.
 
 Do not run destructive database operations against shared or production data without a backup or a documented preview. Retention pruning supports `GET /api/retention/preview`; use it before `POST /api/retention/prune`.
 
@@ -97,7 +101,7 @@ In authenticated deployments, `/readyz`, `/metrics`, and `/metrics/prometheus` r
 
 Publish the matching `docs/openapi.json` with each release. The contract version, `RunReport.version`, scenario versions, and image tag should be traceable together in release notes. See `docs/api.md` for compatibility rules and error-code policy.
 
-Training product deployments should document who can create or disable scenarios, who can archive runs, and how exported reports are retained. The system remains training-only; the abstract assessment module must not be described as tactical guidance or real-world engagement advice.
+Training product deployments should document who can create or disable scenarios, who can create or update course templates, who can archive runs, who can export run archive bundles, and how exported reports and archives are retained. Proxy deployments can set `SHIP_SIM_AUTH_ROLE_HEADER` for per-request roles, or use `SHIP_SIM_AUTH_ROLE_MAP` entries such as `alice=instructor,bob=operator` when the proxy supplies only a trusted user header. If neither a role header nor a mapped role is present, `SHIP_SIM_AUTH_DEFAULT_ROLE` is used; keep it at `viewer` for least-privilege production defaults. See `docs/proxy-identity-runbook.md` for header hardening and role validation checks. Set `SHIP_SIM_COURSE_TEMPLATE_DIR` when file templates are mounted outside the image default `/app/course-templates`. Export completed long exercises with `scripts/export-run-archive.ps1` before destructive retention pruning or cold-storage handoff. The system remains training-only; the abstract assessment module must not be described as tactical guidance or real-world engagement advice.
 
 ## Compose Checks
 

@@ -19,7 +19,7 @@ type Postgres struct {
 	pool *pgxpool.Pool
 }
 
-const CurrentMigrationVersion = 3
+const CurrentMigrationVersion = 5
 
 type MigrationStatus struct {
 	Current  int
@@ -34,7 +34,7 @@ func (m MigrationStatus) Error() error {
 	if m.Ready() {
 		return nil
 	}
-	return fmt.Errorf("database migrations are not current: current version %d, required version %d; apply migrations/001_init.sql through migrations/003_training_product.sql before starting PostgreSQL mode", m.Current, m.Required)
+	return fmt.Errorf("database migrations are not current: current version %d, required version %d; apply migrations/001_init.sql through migrations/005_metrics_history.sql before starting PostgreSQL mode", m.Current, m.Required)
 }
 
 func NewPostgres(ctx context.Context, dsn string) (*Postgres, error) {
@@ -65,6 +65,114 @@ func (p *Postgres) Ready(ctx context.Context) (model.StoreStatus, error) {
 		return model.StoreStatus{}, err
 	}
 	return model.StoreStatus{Store: p.Name(), MigrationVersion: status.Current}, nil
+}
+
+func (p *Postgres) DataSize(ctx context.Context) (model.StoreDataSize, error) {
+	var size model.StoreDataSize
+	err := p.pool.QueryRow(ctx, `
+		SELECT
+			COALESCE(SUM(pg_table_size(c.oid)), 0),
+			COALESCE(SUM(pg_indexes_size(c.oid)), 0),
+			COALESCE(SUM(pg_total_relation_size(c.oid)), 0)
+		FROM pg_class c
+		JOIN pg_namespace n ON n.oid = c.relnamespace
+		WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p')
+	`).Scan(&size.TableBytes, &size.IndexBytes, &size.TotalBytes)
+	if err != nil {
+		return model.StoreDataSize{}, err
+	}
+	size.Store = p.Name()
+	return size, nil
+}
+
+func (p *Postgres) SaveMetricsHistorySample(ctx context.Context, sample model.MetricsHistorySample) error {
+	if sample.SampledAt.IsZero() {
+		sample.SampledAt = time.Now().UTC()
+	}
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `
+INSERT INTO metrics_history (
+	sampled_at,
+	snapshot_frames,
+	event_count,
+	track_point_count,
+	contact_count,
+	snapshot_capacity_pressure,
+	event_capacity_pressure,
+	track_point_capacity_pressure,
+	snapshot_write_avg_ms,
+	snapshot_write_max_ms,
+	snapshot_write_failures,
+	db_table_bytes,
+	db_index_bytes,
+	db_total_bytes
+) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+		sample.SampledAt,
+		sample.SnapshotFrames,
+		sample.EventCount,
+		sample.TrackPointCount,
+		sample.ContactCount,
+		sample.SnapshotCapacityPressure,
+		sample.EventCapacityPressure,
+		sample.TrackPointCapacityPressure,
+		sample.SnapshotWriteAvgMS,
+		sample.SnapshotWriteMaxMS,
+		sample.SnapshotWriteFailures,
+		sample.DBTableBytes,
+		sample.DBIndexBytes,
+		sample.DBTotalBytes,
+	); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `
+DELETE FROM metrics_history
+WHERE id NOT IN (
+	SELECT id
+	FROM metrics_history
+	ORDER BY sampled_at DESC, id DESC
+	LIMIT 288
+)`); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (p *Postgres) ListMetricsHistorySamples(ctx context.Context, limit int) ([]model.MetricsHistorySample, error) {
+	if limit <= 0 {
+		limit = 48
+	}
+	rows, err := p.pool.Query(ctx, `
+SELECT sampled_at, snapshot_frames, event_count, track_point_count, contact_count,
+	snapshot_capacity_pressure, event_capacity_pressure, track_point_capacity_pressure,
+	snapshot_write_avg_ms, snapshot_write_max_ms, snapshot_write_failures,
+	db_table_bytes, db_index_bytes, db_total_bytes
+FROM (
+	SELECT id, sampled_at, snapshot_frames, event_count, track_point_count, contact_count,
+		snapshot_capacity_pressure, event_capacity_pressure, track_point_capacity_pressure,
+		snapshot_write_avg_ms, snapshot_write_max_ms, snapshot_write_failures,
+		db_table_bytes, db_index_bytes, db_total_bytes
+	FROM metrics_history
+	ORDER BY sampled_at DESC, id DESC
+	LIMIT $1
+) recent
+ORDER BY sampled_at ASC, id ASC`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var samples []model.MetricsHistorySample
+	for rows.Next() {
+		sample, err := scanMetricsHistorySample(rows.Scan)
+		if err != nil {
+			return nil, err
+		}
+		samples = append(samples, sample)
+	}
+	return samples, rows.Err()
 }
 
 func (p *Postgres) MigrationStatus(ctx context.Context) (MigrationStatus, error) {
@@ -427,6 +535,29 @@ WHERE run_id=$1`, runID).Scan(&from, &to, &count)
 	return model.SnapshotRange{From: *from, To: *to, Count: int(count)}, true, nil
 }
 
+func (p *Postgres) RunDataCounts(ctx context.Context, runID string) (model.RunDataCounts, error) {
+	var counts model.RunDataCounts
+	counts.RunID = runID
+	var events int64
+	var trackPoints int64
+	var contacts int64
+	var snapshots int64
+	err := p.pool.QueryRow(ctx, `
+SELECT
+	(SELECT COUNT(*) FROM sim_events WHERE run_id=$1),
+	(SELECT COUNT(*) FROM track_points WHERE run_id=$1),
+	(SELECT COUNT(*) FROM contacts_raw WHERE run_id=$1),
+	(SELECT COUNT(*) FROM sim_snapshots WHERE run_id=$1)`, runID).Scan(&events, &trackPoints, &contacts, &snapshots)
+	if err != nil {
+		return model.RunDataCounts{}, err
+	}
+	counts.Events = int(events)
+	counts.TrackPoints = int(trackPoints)
+	counts.Contacts = int(contacts)
+	counts.Snapshots = int(snapshots)
+	return counts, nil
+}
+
 func (p *Postgres) ListTracks(ctx context.Context, runID string) ([]model.Track, error) {
 	rows, err := p.pool.Query(ctx, `
 SELECT id, track_no, kind, threat_level, ST_X(latest_position), ST_Y(latest_position), COALESCE(ST_Z(latest_position),0), confidence, status, last_seen_at
@@ -621,6 +752,75 @@ RETURNING id::text, name, version, description, source, enabled, COALESCE(create
 		return model.ScenarioSummary{}, errors.New("scenario not found")
 	}
 	return summary, err
+}
+
+func (p *Postgres) ListCourseTemplates(ctx context.Context) ([]model.CourseTemplate, error) {
+	rows, err := p.pool.Query(ctx, `
+SELECT id, name, description, source, enabled, training_only, scenario, expected_metadata, review_checklist, safety_notice, COALESCE(created_by,''), created_at, updated_at
+FROM course_templates
+ORDER BY name, id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var templates []model.CourseTemplate
+	for rows.Next() {
+		template, err := scanCourseTemplate(rows.Scan)
+		if err != nil {
+			return nil, err
+		}
+		templates = append(templates, template)
+	}
+	return templates, rows.Err()
+}
+
+func (p *Postgres) GetCourseTemplate(ctx context.Context, id string) (model.CourseTemplate, error) {
+	template, err := scanCourseTemplate(p.pool.QueryRow(ctx, `
+SELECT id, name, description, source, enabled, training_only, scenario, expected_metadata, review_checklist, safety_notice, COALESCE(created_by,''), created_at, updated_at
+FROM course_templates
+WHERE id=$1`, id).Scan)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return model.CourseTemplate{}, errors.New("course template not found")
+	}
+	return template, err
+}
+
+func (p *Postgres) SaveCourseTemplate(ctx context.Context, template model.CourseTemplate) (model.CourseTemplate, error) {
+	if template.Source == "" {
+		template.Source = "database"
+	}
+	if !template.Enabled && template.UpdatedAt.IsZero() {
+		template.Enabled = true
+	}
+	scenario, err := json.Marshal(template.Scenario)
+	if err != nil {
+		return model.CourseTemplate{}, err
+	}
+	expectedMetadata, err := json.Marshal(template.ExpectedMetadata)
+	if err != nil {
+		return model.CourseTemplate{}, err
+	}
+	reviewChecklist, err := json.Marshal(template.ReviewChecklist)
+	if err != nil {
+		return model.CourseTemplate{}, err
+	}
+	if template.ID == "" {
+		return scanCourseTemplate(p.pool.QueryRow(ctx, `
+INSERT INTO course_templates (name, description, source, enabled, training_only, scenario, expected_metadata, review_checklist, safety_notice, created_by)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+RETURNING id, name, description, source, enabled, training_only, scenario, expected_metadata, review_checklist, safety_notice, COALESCE(created_by,''), created_at, updated_at`,
+			template.Name, template.Description, template.Source, template.Enabled, template.TrainingOnly, scenario, expectedMetadata, reviewChecklist, template.SafetyNotice, nullableString(template.CreatedBy)).Scan)
+	}
+	saved, err := scanCourseTemplate(p.pool.QueryRow(ctx, `
+UPDATE course_templates
+SET name=$2, description=$3, source=$4, enabled=$5, training_only=$6, scenario=$7, expected_metadata=$8, review_checklist=$9, safety_notice=$10, created_by=COALESCE(created_by,$11), updated_at=now()
+WHERE id=$1
+RETURNING id, name, description, source, enabled, training_only, scenario, expected_metadata, review_checklist, safety_notice, COALESCE(created_by,''), created_at, updated_at`,
+		template.ID, template.Name, template.Description, template.Source, template.Enabled, template.TrainingOnly, scenario, expectedMetadata, reviewChecklist, template.SafetyNotice, nullableString(template.CreatedBy)).Scan)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return model.CourseTemplate{}, errors.New("course template not found")
+	}
+	return saved, err
 }
 
 func (p *Postgres) SaveEventAnnotation(ctx context.Context, annotation model.EventAnnotation) (model.EventAnnotation, error) {
@@ -1021,6 +1221,60 @@ func scanSnapshotFrame(scan func(dest ...any) error) (model.SnapshotFrame, error
 		frame.Contacts = []model.Contact{}
 	}
 	return frame, nil
+}
+
+func scanCourseTemplate(scan func(dest ...any) error) (model.CourseTemplate, error) {
+	var template model.CourseTemplate
+	var scenarioJSON []byte
+	var metadataJSON []byte
+	var checklistJSON []byte
+	if err := scan(&template.ID, &template.Name, &template.Description, &template.Source, &template.Enabled, &template.TrainingOnly, &scenarioJSON, &metadataJSON, &checklistJSON, &template.SafetyNotice, &template.CreatedBy, &template.CreatedAt, &template.UpdatedAt); err != nil {
+		return model.CourseTemplate{}, err
+	}
+	if err := json.Unmarshal(scenarioJSON, &template.Scenario); err != nil {
+		return model.CourseTemplate{}, err
+	}
+	if len(metadataJSON) > 0 {
+		if err := json.Unmarshal(metadataJSON, &template.ExpectedMetadata); err != nil {
+			return model.CourseTemplate{}, err
+		}
+	}
+	if len(checklistJSON) > 0 {
+		if err := json.Unmarshal(checklistJSON, &template.ReviewChecklist); err != nil {
+			return model.CourseTemplate{}, err
+		}
+	}
+	if template.ExpectedMetadata == nil {
+		template.ExpectedMetadata = map[string]any{}
+	}
+	if template.ReviewChecklist == nil {
+		template.ReviewChecklist = []model.CourseChecklistItem{}
+	}
+	return template, nil
+}
+
+func scanMetricsHistorySample(scan func(dest ...any) error) (model.MetricsHistorySample, error) {
+	var sample model.MetricsHistorySample
+	err := scan(
+		&sample.SampledAt,
+		&sample.SnapshotFrames,
+		&sample.EventCount,
+		&sample.TrackPointCount,
+		&sample.ContactCount,
+		&sample.SnapshotCapacityPressure,
+		&sample.EventCapacityPressure,
+		&sample.TrackPointCapacityPressure,
+		&sample.SnapshotWriteAvgMS,
+		&sample.SnapshotWriteMaxMS,
+		&sample.SnapshotWriteFailures,
+		&sample.DBTableBytes,
+		&sample.DBIndexBytes,
+		&sample.DBTotalBytes,
+	)
+	if err != nil {
+		return model.MetricsHistorySample{}, err
+	}
+	return sample, nil
 }
 
 func polygonWKT(points []model.Vec3) (string, error) {

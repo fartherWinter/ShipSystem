@@ -58,26 +58,55 @@ type wsTicketResponse struct {
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
+type sessionResponse struct {
+	AuthMode      string          `json:"auth_mode"`
+	Authenticated bool            `json:"authenticated"`
+	UserID        string          `json:"user_id,omitempty"`
+	Role          string          `json:"role"`
+	RoleSource    string          `json:"role_source,omitempty"`
+	Permissions   map[string]bool `json:"permissions"`
+	SafetyNotice  string          `json:"safety_notice"`
+}
+
 type metricsSnapshot struct {
-	ActiveRuns           int
-	ListedRuns           int
-	WebSocketConnections int64
-	SnapshotFrames       int
-	SnapshotFramesByRun  map[string]int
-	Runtime              sim.RuntimeMetrics
-	RequestCount         int64
-	RequestErrors        int64
-	RequestDurationAvgMS float64
-	RequestDurationMaxMS float64
-	EngineCount          int
-	RunningEngineCount   int
-	StoreReady           bool
-	StoreStatus          model.StoreStatus
-	StoreError           string
-	SampleLimit          int
+	SampledAt               time.Time
+	ActiveRuns              int
+	ListedRuns              int
+	WebSocketConnections    int64
+	SnapshotFrames          int
+	SnapshotFramesByRun     map[string]int
+	SnapshotPressure        float64
+	SnapshotPressureByRun   map[string]float64
+	EventCount              int
+	EventCountByRun         map[string]int
+	EventPressure           float64
+	EventPressureByRun      map[string]float64
+	TrackPointCount         int
+	TrackPointCountByRun    map[string]int
+	TrackPointPressure      float64
+	TrackPointPressureByRun map[string]float64
+	ContactCount            int
+	ContactCountByRun       map[string]int
+	Runtime                 sim.RuntimeMetrics
+	RequestCount            int64
+	RequestErrors           int64
+	RequestDurationAvgMS    float64
+	RequestDurationMaxMS    float64
+	EngineCount             int
+	RunningEngineCount      int
+	StoreReady              bool
+	StoreStatus             model.StoreStatus
+	StoreError              string
+	StoreDataSize           model.StoreDataSize
+	StoreDataSizeError      string
+	SampleLimit             int
+	MaxTrackPointsPerRun    int
+	MaxEventsPerRun         int
+	MaxSnapshotsPerRun      int
 }
 
 const wsTicketTTL = 30 * time.Second
+const metricsHistoryLimit = 288
 
 func NewServer(manager *sim.Manager, logger *slog.Logger) *Server {
 	return NewServerWithConfig(manager, logger, config.Default())
@@ -108,10 +137,14 @@ func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.health)
 	mux.HandleFunc("/readyz", s.ready)
+	mux.HandleFunc("/api/session", s.session)
 	mux.HandleFunc("/metrics", s.metrics)
+	mux.HandleFunc("/metrics/history", s.metricsHistoryHandler)
 	mux.HandleFunc("/metrics/prometheus", s.prometheusMetrics)
 	mux.HandleFunc("/api/retention/preview", s.retentionPreview)
 	mux.HandleFunc("/api/retention/prune", s.retentionPrune)
+	mux.HandleFunc("/api/course-templates", s.courseTemplates)
+	mux.HandleFunc("/api/course-templates/", s.courseTemplate)
 	mux.HandleFunc("/api/runs", s.runs)
 	mux.HandleFunc("/api/runs/", s.run)
 	mux.HandleFunc("/api/scenarios", s.scenarios)
@@ -143,6 +176,29 @@ func (s *Server) ready(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) session(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	userID := userFromContext(r.Context())
+	role := roleFromContext(r.Context())
+	roleSource := roleSourceFromContext(r.Context())
+	if !s.cfg.AuthEnabled() && userID == "" {
+		userID = "local"
+		roleSource = "local"
+	}
+	writeJSON(w, http.StatusOK, sessionResponse{
+		AuthMode:      s.cfg.AuthMode,
+		Authenticated: !s.cfg.AuthEnabled() || userID != "",
+		UserID:        userID,
+		Role:          role,
+		RoleSource:    roleSource,
+		Permissions:   permissionsForRole(role),
+		SafetyNotice:  model.SafetyNotice,
+	})
+}
+
 func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		methodNotAllowed(w)
@@ -154,29 +210,86 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "metrics_failed", err)
 		return
 	}
+	s.recordMetricsHistory(r.Context(), snapshot)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"active_runs":                  snapshot.ActiveRuns,
-		"listed_runs":                  snapshot.ListedRuns,
-		"websocket_connections":        snapshot.WebSocketConnections,
-		"snapshot_frames":              snapshot.SnapshotFrames,
-		"snapshot_frames_by_run":       snapshot.SnapshotFramesByRun,
-		"snapshot_write_count":         snapshot.Runtime.SnapshotWriteCount,
-		"snapshot_write_failures":      snapshot.Runtime.SnapshotWriteFailures,
-		"snapshot_write_last_ms":       snapshot.Runtime.SnapshotWriteLastMS,
-		"snapshot_write_avg_ms":        snapshot.Runtime.SnapshotWriteAvgMS,
-		"snapshot_write_max_ms":        snapshot.Runtime.SnapshotWriteMaxMS,
-		"http_request_count":           snapshot.RequestCount,
-		"http_request_errors":          snapshot.RequestErrors,
-		"http_request_duration_avg_ms": snapshot.RequestDurationAvgMS,
-		"http_request_duration_max_ms": snapshot.RequestDurationMaxMS,
-		"engine_count":                 snapshot.EngineCount,
-		"running_engine_count":         snapshot.RunningEngineCount,
-		"db_ready":                     snapshot.StoreReady,
-		"db_store":                     snapshot.StoreStatus.Store,
-		"db_migration_version":         snapshot.StoreStatus.MigrationVersion,
-		"db_error":                     snapshot.StoreError,
-		"sample_limit":                 snapshot.SampleLimit,
+		"sampled_at":                           snapshot.SampledAt,
+		"active_runs":                          snapshot.ActiveRuns,
+		"listed_runs":                          snapshot.ListedRuns,
+		"websocket_connections":                snapshot.WebSocketConnections,
+		"snapshot_frames":                      snapshot.SnapshotFrames,
+		"snapshot_frames_by_run":               snapshot.SnapshotFramesByRun,
+		"snapshot_capacity_pressure":           snapshot.SnapshotPressure,
+		"snapshot_capacity_pressure_by_run":    snapshot.SnapshotPressureByRun,
+		"event_count":                          snapshot.EventCount,
+		"event_count_by_run":                   snapshot.EventCountByRun,
+		"event_capacity_pressure":              snapshot.EventPressure,
+		"event_capacity_pressure_by_run":       snapshot.EventPressureByRun,
+		"track_point_count":                    snapshot.TrackPointCount,
+		"track_point_count_by_run":             snapshot.TrackPointCountByRun,
+		"track_point_capacity_pressure":        snapshot.TrackPointPressure,
+		"track_point_capacity_pressure_by_run": snapshot.TrackPointPressureByRun,
+		"contact_count":                        snapshot.ContactCount,
+		"contact_count_by_run":                 snapshot.ContactCountByRun,
+		"max_track_points_per_run":             snapshot.MaxTrackPointsPerRun,
+		"max_events_per_run":                   snapshot.MaxEventsPerRun,
+		"max_snapshots_per_run":                snapshot.MaxSnapshotsPerRun,
+		"snapshot_write_count":                 snapshot.Runtime.SnapshotWriteCount,
+		"snapshot_write_failures":              snapshot.Runtime.SnapshotWriteFailures,
+		"snapshot_write_last_ms":               snapshot.Runtime.SnapshotWriteLastMS,
+		"snapshot_write_avg_ms":                snapshot.Runtime.SnapshotWriteAvgMS,
+		"snapshot_write_max_ms":                snapshot.Runtime.SnapshotWriteMaxMS,
+		"http_request_count":                   snapshot.RequestCount,
+		"http_request_errors":                  snapshot.RequestErrors,
+		"http_request_duration_avg_ms":         snapshot.RequestDurationAvgMS,
+		"http_request_duration_max_ms":         snapshot.RequestDurationMaxMS,
+		"engine_count":                         snapshot.EngineCount,
+		"running_engine_count":                 snapshot.RunningEngineCount,
+		"db_ready":                             snapshot.StoreReady,
+		"db_store":                             snapshot.StoreStatus.Store,
+		"db_migration_version":                 snapshot.StoreStatus.MigrationVersion,
+		"db_error":                             snapshot.StoreError,
+		"db_table_bytes":                       snapshot.StoreDataSize.TableBytes,
+		"db_index_bytes":                       snapshot.StoreDataSize.IndexBytes,
+		"db_total_bytes":                       snapshot.StoreDataSize.TotalBytes,
+		"db_size_error":                        snapshot.StoreDataSizeError,
+		"sample_limit":                         snapshot.SampleLimit,
 	})
+}
+
+func (s *Server) metricsHistoryHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	limit := intQuery(r, "limit", 48, metricsHistoryLimit)
+	samples, err := s.manager.MetricsHistory(r.Context(), limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "metrics_failed", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, samples)
+}
+
+func (s *Server) recordMetricsHistory(ctx context.Context, snapshot metricsSnapshot) {
+	sample := model.MetricsHistorySample{
+		SampledAt:                  snapshot.SampledAt,
+		SnapshotFrames:             snapshot.SnapshotFrames,
+		EventCount:                 snapshot.EventCount,
+		TrackPointCount:            snapshot.TrackPointCount,
+		ContactCount:               snapshot.ContactCount,
+		SnapshotCapacityPressure:   snapshot.SnapshotPressure,
+		EventCapacityPressure:      snapshot.EventPressure,
+		TrackPointCapacityPressure: snapshot.TrackPointPressure,
+		SnapshotWriteAvgMS:         snapshot.Runtime.SnapshotWriteAvgMS,
+		SnapshotWriteMaxMS:         snapshot.Runtime.SnapshotWriteMaxMS,
+		SnapshotWriteFailures:      snapshot.Runtime.SnapshotWriteFailures,
+		DBTableBytes:               snapshot.StoreDataSize.TableBytes,
+		DBIndexBytes:               snapshot.StoreDataSize.IndexBytes,
+		DBTotalBytes:               snapshot.StoreDataSize.TotalBytes,
+	}
+	if err := s.manager.SaveMetricsHistorySample(ctx, sample); err != nil {
+		s.logger.Warn("record metrics history failed", "error", err)
+	}
 }
 
 func (s *Server) prometheusMetrics(w http.ResponseWriter, r *http.Request) {
@@ -201,14 +314,38 @@ func (s *Server) collectMetrics(ctx context.Context, limit int) (metricsSnapshot
 	activeRuns := 0
 	snapshotFrames := 0
 	snapshotFramesByRun := map[string]int{}
+	snapshotPressureByRun := map[string]float64{}
+	eventCount := 0
+	eventCountByRun := map[string]int{}
+	eventPressureByRun := map[string]float64{}
+	trackPointCount := 0
+	trackPointCountByRun := map[string]int{}
+	trackPointPressureByRun := map[string]float64{}
+	contactCount := 0
+	contactCountByRun := map[string]int{}
 	runtimeMetrics := s.manager.RuntimeMetrics()
 	for _, run := range runs {
 		if run.Status == model.RunRunning {
 			activeRuns++
 		}
-		if snapshotRange, ok, err := s.manager.SnapshotRange(ctx, run.ID); err == nil && ok {
-			snapshotFrames += snapshotRange.Count
-			snapshotFramesByRun[run.ID] = snapshotRange.Count
+		if counts, err := s.manager.RunDataCounts(ctx, run.ID); err == nil {
+			snapshotFrames += counts.Snapshots
+			snapshotFramesByRun[run.ID] = counts.Snapshots
+			if s.cfg.MaxSnapshotsPerRun > 0 {
+				snapshotPressureByRun[run.ID] = capacityPressure(counts.Snapshots, s.cfg.MaxSnapshotsPerRun)
+			}
+			eventCount += counts.Events
+			eventCountByRun[run.ID] = counts.Events
+			if s.cfg.MaxEventsPerRun > 0 {
+				eventPressureByRun[run.ID] = capacityPressure(counts.Events, s.cfg.MaxEventsPerRun)
+			}
+			trackPointCount += counts.TrackPoints
+			trackPointCountByRun[run.ID] = counts.TrackPoints
+			if s.cfg.MaxTrackPointsPerRun > 0 {
+				trackPointPressureByRun[run.ID] = capacityPressure(counts.TrackPoints, s.cfg.MaxTrackPointsPerRun)
+			}
+			contactCount += counts.Contacts
+			contactCountByRun[run.ID] = counts.Contacts
 		}
 	}
 	requestCount := s.requestCount.Load()
@@ -223,24 +360,61 @@ func (s *Server) collectMetrics(ctx context.Context, limit int) (metricsSnapshot
 	if storeErr != nil {
 		storeError = storeErr.Error()
 	}
+	storeDataSize, storeDataSizeErr := s.manager.StoreDataSize(ctx)
+	storeDataSizeError := ""
+	if storeDataSizeErr != nil {
+		storeDataSizeError = storeDataSizeErr.Error()
+	}
 	return metricsSnapshot{
-		ActiveRuns:           activeRuns,
-		ListedRuns:           len(runs),
-		WebSocketConnections: s.wsConnections.Load(),
-		SnapshotFrames:       snapshotFrames,
-		SnapshotFramesByRun:  snapshotFramesByRun,
-		Runtime:              runtimeMetrics,
-		RequestCount:         requestCount,
-		RequestErrors:        s.requestErrors.Load(),
-		RequestDurationAvgMS: requestDurationAvgMS,
-		RequestDurationMaxMS: nsToMS(s.requestDurationMaxNS.Load()),
-		EngineCount:          engineCount,
-		RunningEngineCount:   runningEngineCount,
-		StoreReady:           storeReady,
-		StoreStatus:          storeStatus,
-		StoreError:           storeError,
-		SampleLimit:          limit,
+		SampledAt:               time.Now().UTC(),
+		ActiveRuns:              activeRuns,
+		ListedRuns:              len(runs),
+		WebSocketConnections:    s.wsConnections.Load(),
+		SnapshotFrames:          snapshotFrames,
+		SnapshotFramesByRun:     snapshotFramesByRun,
+		SnapshotPressure:        capacityPressure(snapshotFrames, s.cfg.MaxSnapshotsPerRun*maxInt(1, len(runs))),
+		SnapshotPressureByRun:   snapshotPressureByRun,
+		EventCount:              eventCount,
+		EventCountByRun:         eventCountByRun,
+		EventPressure:           capacityPressure(eventCount, s.cfg.MaxEventsPerRun*maxInt(1, len(runs))),
+		EventPressureByRun:      eventPressureByRun,
+		TrackPointCount:         trackPointCount,
+		TrackPointCountByRun:    trackPointCountByRun,
+		TrackPointPressure:      capacityPressure(trackPointCount, s.cfg.MaxTrackPointsPerRun*maxInt(1, len(runs))),
+		TrackPointPressureByRun: trackPointPressureByRun,
+		ContactCount:            contactCount,
+		ContactCountByRun:       contactCountByRun,
+		Runtime:                 runtimeMetrics,
+		RequestCount:            requestCount,
+		RequestErrors:           s.requestErrors.Load(),
+		RequestDurationAvgMS:    requestDurationAvgMS,
+		RequestDurationMaxMS:    nsToMS(s.requestDurationMaxNS.Load()),
+		EngineCount:             engineCount,
+		RunningEngineCount:      runningEngineCount,
+		StoreReady:              storeReady,
+		StoreStatus:             storeStatus,
+		StoreError:              storeError,
+		StoreDataSize:           storeDataSize,
+		StoreDataSizeError:      storeDataSizeError,
+		SampleLimit:             limit,
+		MaxTrackPointsPerRun:    s.cfg.MaxTrackPointsPerRun,
+		MaxEventsPerRun:         s.cfg.MaxEventsPerRun,
+		MaxSnapshotsPerRun:      s.cfg.MaxSnapshotsPerRun,
 	}, nil
+}
+
+func capacityPressure(count, limit int) float64 {
+	if limit <= 0 {
+		return 0
+	}
+	pressure := float64(count) / float64(limit)
+	if pressure > 1 {
+		return 1
+	}
+	if pressure < 0 {
+		return 0
+	}
+	return pressure
 }
 
 func writePrometheusMetrics(w io.Writer, snapshot metricsSnapshot) {
@@ -276,6 +450,33 @@ func writePrometheusMetrics(w io.Writer, snapshot metricsSnapshot) {
 	fmt.Fprintln(w, "# HELP ship_sim_snapshot_frames_total Snapshot frames counted in sampled runs.")
 	fmt.Fprintln(w, "# TYPE ship_sim_snapshot_frames_total gauge")
 	fmt.Fprintf(w, "ship_sim_snapshot_frames_total %d\n", snapshot.SnapshotFrames)
+	fmt.Fprintln(w, "# HELP ship_sim_snapshot_capacity_pressure Snapshot capacity pressure in the sampled run list.")
+	fmt.Fprintln(w, "# TYPE ship_sim_snapshot_capacity_pressure gauge")
+	fmt.Fprintf(w, "ship_sim_snapshot_capacity_pressure %.6f\n", snapshot.SnapshotPressure)
+	fmt.Fprintln(w, "# HELP ship_sim_snapshot_capacity_limit Configured maximum snapshots per run.")
+	fmt.Fprintln(w, "# TYPE ship_sim_snapshot_capacity_limit gauge")
+	fmt.Fprintf(w, "ship_sim_snapshot_capacity_limit %d\n", snapshot.MaxSnapshotsPerRun)
+	fmt.Fprintln(w, "# HELP ship_sim_events_total Events counted in sampled runs.")
+	fmt.Fprintln(w, "# TYPE ship_sim_events_total gauge")
+	fmt.Fprintf(w, "ship_sim_events_total %d\n", snapshot.EventCount)
+	fmt.Fprintln(w, "# HELP ship_sim_event_capacity_pressure Event capacity pressure in the sampled run list.")
+	fmt.Fprintln(w, "# TYPE ship_sim_event_capacity_pressure gauge")
+	fmt.Fprintf(w, "ship_sim_event_capacity_pressure %.6f\n", snapshot.EventPressure)
+	fmt.Fprintln(w, "# HELP ship_sim_event_capacity_limit Configured maximum events per run.")
+	fmt.Fprintln(w, "# TYPE ship_sim_event_capacity_limit gauge")
+	fmt.Fprintf(w, "ship_sim_event_capacity_limit %d\n", snapshot.MaxEventsPerRun)
+	fmt.Fprintln(w, "# HELP ship_sim_track_points_total Track points counted in sampled runs.")
+	fmt.Fprintln(w, "# TYPE ship_sim_track_points_total gauge")
+	fmt.Fprintf(w, "ship_sim_track_points_total %d\n", snapshot.TrackPointCount)
+	fmt.Fprintln(w, "# HELP ship_sim_track_point_capacity_pressure Track point capacity pressure in the sampled run list.")
+	fmt.Fprintln(w, "# TYPE ship_sim_track_point_capacity_pressure gauge")
+	fmt.Fprintf(w, "ship_sim_track_point_capacity_pressure %.6f\n", snapshot.TrackPointPressure)
+	fmt.Fprintln(w, "# HELP ship_sim_track_point_capacity_limit Configured maximum track points per run.")
+	fmt.Fprintln(w, "# TYPE ship_sim_track_point_capacity_limit gauge")
+	fmt.Fprintf(w, "ship_sim_track_point_capacity_limit %d\n", snapshot.MaxTrackPointsPerRun)
+	fmt.Fprintln(w, "# HELP ship_sim_contacts_total Raw contacts counted in sampled runs.")
+	fmt.Fprintln(w, "# TYPE ship_sim_contacts_total gauge")
+	fmt.Fprintf(w, "ship_sim_contacts_total %d\n", snapshot.ContactCount)
 	fmt.Fprintln(w, "# HELP ship_sim_snapshot_writes_total Snapshot write attempts.")
 	fmt.Fprintln(w, "# TYPE ship_sim_snapshot_writes_total counter")
 	fmt.Fprintf(w, "ship_sim_snapshot_writes_total %d\n", snapshot.Runtime.SnapshotWriteCount)
@@ -293,6 +494,15 @@ func writePrometheusMetrics(w io.Writer, snapshot metricsSnapshot) {
 	fmt.Fprintln(w, "# HELP ship_sim_db_migration_version Current store migration version.")
 	fmt.Fprintln(w, "# TYPE ship_sim_db_migration_version gauge")
 	fmt.Fprintf(w, "ship_sim_db_migration_version{store=\"%s\"} %d\n", store, snapshot.StoreStatus.MigrationVersion)
+	fmt.Fprintln(w, "# HELP ship_sim_db_table_bytes Public schema table bytes reported by the backing store.")
+	fmt.Fprintln(w, "# TYPE ship_sim_db_table_bytes gauge")
+	fmt.Fprintf(w, "ship_sim_db_table_bytes{store=\"%s\"} %d\n", store, snapshot.StoreDataSize.TableBytes)
+	fmt.Fprintln(w, "# HELP ship_sim_db_index_bytes Public schema index bytes reported by the backing store.")
+	fmt.Fprintln(w, "# TYPE ship_sim_db_index_bytes gauge")
+	fmt.Fprintf(w, "ship_sim_db_index_bytes{store=\"%s\"} %d\n", store, snapshot.StoreDataSize.IndexBytes)
+	fmt.Fprintln(w, "# HELP ship_sim_db_total_bytes Public schema total bytes reported by the backing store.")
+	fmt.Fprintln(w, "# TYPE ship_sim_db_total_bytes gauge")
+	fmt.Fprintf(w, "ship_sim_db_total_bytes{store=\"%s\"} %d\n", store, snapshot.StoreDataSize.TotalBytes)
 }
 
 func (s *Server) recordRequest(status int, duration time.Duration) {
@@ -510,6 +720,85 @@ func retentionPolicyEmpty(policy model.RetentionPolicy) bool {
 		policy.MaxTrackPointsPerRun <= 0 &&
 		policy.MaxEventsPerRun <= 0 &&
 		policy.MaxSnapshotsPerRun <= 0
+}
+
+func (s *Server) courseTemplates(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/api/course-templates" {
+		http.NotFound(w, r)
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		templates, err := s.manager.ListCourseTemplates(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "list_course_templates_failed", err)
+			return
+		}
+		writeJSON(w, http.StatusOK, templates)
+	case http.MethodPost:
+		var template model.CourseTemplate
+		if err := s.decodeJSON(r, &template); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_json", err)
+			return
+		}
+		saved, err := s.manager.CreateCourseTemplate(r.Context(), userFromContext(r.Context()), template)
+		if err != nil {
+			writeManagerError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, saved)
+	default:
+		methodNotAllowed(w)
+	}
+}
+
+func (s *Server) courseTemplate(w http.ResponseWriter, r *http.Request) {
+	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/course-templates/"), "/")
+	if len(parts) == 0 || parts[0] == "" {
+		http.NotFound(w, r)
+		return
+	}
+	id := parts[0]
+	if len(parts) == 1 {
+		switch r.Method {
+		case http.MethodGet:
+			template, ok := s.manager.CourseTemplate(r.Context(), id)
+			if !ok {
+				writeError(w, http.StatusNotFound, "course_template_not_found", errors.New("course template not found"))
+				return
+			}
+			writeJSON(w, http.StatusOK, template)
+		case http.MethodPut:
+			var template model.CourseTemplate
+			if err := s.decodeJSON(r, &template); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid_json", err)
+				return
+			}
+			saved, err := s.manager.UpdateCourseTemplate(r.Context(), id, userFromContext(r.Context()), template)
+			if err != nil {
+				writeManagerError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, saved)
+		default:
+			methodNotAllowed(w)
+		}
+		return
+	}
+	if len(parts) == 2 && parts[1] == "scenario" {
+		if r.Method != http.MethodPost {
+			methodNotAllowed(w)
+			return
+		}
+		summary, err := s.manager.CreateScenarioFromCourseTemplate(r.Context(), id, userFromContext(r.Context()))
+		if err != nil {
+			writeManagerError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, summary)
+		return
+	}
+	http.NotFound(w, r)
 }
 
 func (s *Server) scenarios(w http.ResponseWriter, r *http.Request) {
@@ -1281,6 +1570,10 @@ func writeManagerError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusNotFound, "scenario_not_found", err)
 		return
 	}
+	if strings.Contains(err.Error(), "course template not found") {
+		writeError(w, http.StatusNotFound, "course_template_not_found", err)
+		return
+	}
 	if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "engine not found") {
 		writeError(w, http.StatusNotFound, "run_not_found", err)
 		return
@@ -1309,12 +1602,29 @@ type contextKey string
 const (
 	requestIDKey        contextKey = "request_id"
 	userIDKey           contextKey = "user_id"
+	roleKey             contextKey = "role"
+	roleSourceKey       contextKey = "role_source"
 	requestLogFieldsKey contextKey = "request_log_fields"
 )
 
 type requestLogFields struct {
 	UserID string
+	Role   string
 }
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+const (
+	roleViewer     = "viewer"
+	roleOperator   = "operator"
+	roleInstructor = "instructor"
+	roleAdmin      = "admin"
+)
 
 type statusRecorder struct {
 	http.ResponseWriter
@@ -1358,6 +1668,7 @@ func (s *Server) requestID(next http.Handler) http.Handler {
 		s.logger.Info("request completed",
 			"request_id", requestID,
 			"user_id", fields.UserID,
+			"role", fields.Role,
 			"run_id", runIDFromPath(r.URL.Path),
 			"method", r.Method,
 			"path", r.URL.Path,
@@ -1373,16 +1684,24 @@ func (s *Server) auth(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		userID, ok := s.authenticate(r)
+		userID, role, roleSource, ok := s.authenticate(r)
 		if !ok {
 			writeError(w, http.StatusUnauthorized, "unauthorized", errors.New("authentication is required"))
 			return
 		}
 		ctx := context.WithValue(r.Context(), userIDKey, userID)
+		ctx = context.WithValue(ctx, roleKey, role)
+		ctx = context.WithValue(ctx, roleSourceKey, roleSource)
 		if fields, ok := r.Context().Value(requestLogFieldsKey).(*requestLogFields); ok {
 			fields.UserID = userID
+			fields.Role = role
 		}
-		next.ServeHTTP(w, r.WithContext(ctx))
+		nextRequest := r.WithContext(ctx)
+		if !s.authorizeRole(nextRequest) {
+			writeError(w, http.StatusForbidden, "forbidden", errors.New("role is not allowed to perform this action"))
+			return
+		}
+		next.ServeHTTP(w, nextRequest)
 	})
 }
 
@@ -1391,12 +1710,12 @@ func (s *Server) requiresAuth(r *http.Request) bool {
 		return false
 	}
 	path := r.URL.Path
-	return path == "/readyz" || path == "/metrics" || path == "/metrics/prometheus" || path == "/api/runs" || path == "/api/scenarios" ||
+	return path == "/readyz" || path == "/api/session" || path == "/metrics" || path == "/metrics/history" || path == "/metrics/prometheus" || path == "/api/runs" || path == "/api/scenarios" || path == "/api/course-templates" ||
 		strings.HasPrefix(path, "/api/retention/") ||
-		strings.HasPrefix(path, "/api/runs/") || strings.HasPrefix(path, "/api/scenarios/")
+		strings.HasPrefix(path, "/api/runs/") || strings.HasPrefix(path, "/api/scenarios/") || strings.HasPrefix(path, "/api/course-templates/")
 }
 
-func (s *Server) authenticate(r *http.Request) (string, bool) {
+func (s *Server) authenticate(r *http.Request) (string, string, string, bool) {
 	switch s.cfg.AuthMode {
 	case config.AuthToken:
 		token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
@@ -1404,17 +1723,104 @@ func (s *Server) authenticate(r *http.Request) (string, bool) {
 			token = r.Header.Get("X-Ship-Sim-Token")
 		}
 		if token != "" && token == s.cfg.AuthToken {
-			return "token-user", true
+			return "token-user", roleInstructor, "token", true
 		}
 	case config.AuthProxy:
 		user := strings.TrimSpace(r.Header.Get(s.cfg.AuthUserHeader))
 		if user != "" {
-			return user, true
+			role, source, ok := s.proxyRole(user, r.Header.Get(s.cfg.AuthRoleHeader))
+			if !ok {
+				return "", "", "", false
+			}
+			return user, role, source, true
 		}
 	case config.AuthOff:
-		return "", true
+		return "", roleInstructor, "local", true
 	}
-	return "", false
+	return "", "", "", false
+}
+
+func (s *Server) proxyRole(user, rawHeaderRole string) (string, string, bool) {
+	if strings.TrimSpace(rawHeaderRole) != "" {
+		role, ok := normalizedRole(rawHeaderRole)
+		return role, "header", ok
+	}
+	if roleValue := strings.TrimSpace(s.cfg.AuthRoleMap[user]); roleValue != "" {
+		role, ok := normalizedRole(roleValue)
+		return role, "map", ok
+	}
+	if strings.TrimSpace(s.cfg.AuthDefaultRole) != "" {
+		role, ok := normalizedRole(s.cfg.AuthDefaultRole)
+		return role, "default", ok
+	}
+	role, ok := normalizedRole("")
+	return role, "compat_default", ok
+}
+
+func (s *Server) authorizeRole(r *http.Request) bool {
+	role := roleFromContext(r.Context())
+	if role == roleAdmin || role == roleInstructor {
+		return true
+	}
+	if r.Method == http.MethodGet {
+		return true
+	}
+	path := r.URL.Path
+	if role == roleViewer {
+		return r.Method == http.MethodPost && strings.HasPrefix(path, "/api/runs/") && strings.HasSuffix(path, "/ws-ticket")
+	}
+	if role == roleOperator {
+		if path == "/api/runs" && r.Method == http.MethodPost {
+			return true
+		}
+		if strings.HasPrefix(path, "/api/runs/") {
+			return operatorRunMutationAllowed(path, r.Method)
+		}
+		return false
+	}
+	return false
+}
+
+func operatorRunMutationAllowed(path, method string) bool {
+	if method == http.MethodPost {
+		for _, suffix := range []string{"/start", "/pause", "/stop", "/actions", "/annotations", "/ws-ticket"} {
+			if strings.HasSuffix(path, suffix) {
+				return true
+			}
+		}
+	}
+	return method == http.MethodPut && strings.HasSuffix(path, "/metadata")
+}
+
+func permissionsForRole(role string) map[string]bool {
+	canRunMutate := role == roleOperator || role == roleInstructor || role == roleAdmin
+	canManage := role == roleInstructor || role == roleAdmin
+	return map[string]bool{
+		"view_runs":                true,
+		"export_reports":           true,
+		"request_websocket_ticket": true,
+		"create_runs":              canRunMutate,
+		"control_runs":             canRunMutate,
+		"submit_training_actions":  canRunMutate,
+		"annotate_events":          canRunMutate,
+		"edit_run_metadata":        canRunMutate,
+		"manage_scenarios":         canManage,
+		"manage_retention":         canManage,
+	}
+}
+
+func normalizedRole(raw string) (string, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return roleInstructor, true
+	}
+	raw = strings.ToLower(strings.Split(raw, ",")[0])
+	switch raw {
+	case roleViewer, roleOperator, roleInstructor, roleAdmin:
+		return raw, true
+	default:
+		return "", false
+	}
 }
 
 func (s *Server) securityHeaders(next http.Handler) http.Handler {
@@ -1430,6 +1836,20 @@ func (s *Server) securityHeaders(next http.Handler) http.Handler {
 func userFromContext(ctx context.Context) string {
 	if userID, ok := ctx.Value(userIDKey).(string); ok {
 		return userID
+	}
+	return ""
+}
+
+func roleFromContext(ctx context.Context) string {
+	if role, ok := ctx.Value(roleKey).(string); ok && role != "" {
+		return role
+	}
+	return roleInstructor
+}
+
+func roleSourceFromContext(ctx context.Context) string {
+	if source, ok := ctx.Value(roleSourceKey).(string); ok {
+		return source
 	}
 	return ""
 }

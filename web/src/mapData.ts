@@ -1,4 +1,4 @@
-import type { Track, TrackPoint, Zone } from "./types";
+import type { Sensor, Track, TrackPoint, Vec3, Zone } from "./types";
 
 type PointFeature = {
   type: "Feature";
@@ -41,6 +41,23 @@ export function tracksToFeatureCollection(tracks: Track[]): FeatureCollection<Po
   };
 }
 
+export function sensorsToFeatureCollection(sensors: Sensor[]): FeatureCollection<PointFeature> {
+  return {
+    type: "FeatureCollection",
+    features: sensors
+      .filter((sensor) => Number.isFinite(sensor.position?.lon) && Number.isFinite(sensor.position?.lat))
+      .map((sensor) => ({
+        type: "Feature",
+        geometry: { type: "Point", coordinates: [sensor.position.lon, sensor.position.lat] },
+        properties: {
+          id: sensor.id,
+          name: sensor.name,
+          kind: sensor.kind
+        }
+      }))
+  };
+}
+
 export function zonesToFeatureCollection(zones: Zone[]): FeatureCollection<PolygonFeature> {
   return {
     type: "FeatureCollection",
@@ -61,6 +78,59 @@ export function zonesToFeatureCollection(zones: Zone[]): FeatureCollection<Polyg
           }
         };
       })
+  };
+}
+
+export function zoneVerticesToFeatureCollection(zones: Zone[], selectedZoneID = "", selectedVertexIndex = -1): FeatureCollection<PointFeature> {
+  return {
+    type: "FeatureCollection",
+    features: zones.flatMap((zone) =>
+      (zone.polygon ?? [])
+        .filter((point) => Number.isFinite(point.lon) && Number.isFinite(point.lat))
+        .map((point, index) => ({
+          type: "Feature" as const,
+          geometry: { type: "Point" as const, coordinates: [point.lon, point.lat] as [number, number] },
+          properties: {
+            id: `${zone.id}:${index}`,
+            zone_id: zone.id,
+            zone_name: zone.name,
+            vertex_index: index,
+            order: index + 1,
+            selected: zone.id === selectedZoneID && index === selectedVertexIndex ? 1 : 0
+          }
+        }))
+    )
+  };
+}
+
+export function zoneDraftToFeatureCollection(points: Vec3[]): FeatureCollection<LineFeature> {
+  const coordinates = points.map((point) => [point.lon, point.lat] as [number, number]);
+  return {
+    type: "FeatureCollection",
+    features:
+      coordinates.length >= 2
+        ? [
+            {
+              type: "Feature",
+              geometry: { type: "LineString", coordinates },
+              properties: { id: "scenario-zone-draft" }
+            }
+          ]
+        : []
+  };
+}
+
+export function zoneDraftPointsToFeatureCollection(points: Vec3[]): FeatureCollection<PointFeature> {
+  return {
+    type: "FeatureCollection",
+    features: points.map((point, index) => ({
+      type: "Feature",
+      geometry: { type: "Point", coordinates: [point.lon, point.lat] },
+      properties: {
+        id: `draft-${index + 1}`,
+        order: index + 1
+      }
+    }))
   };
 }
 

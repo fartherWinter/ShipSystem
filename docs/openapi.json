@@ -28,6 +28,9 @@
       "name": "Scenarios"
     },
     {
+      "name": "Course Templates"
+    },
+    {
       "name": "Replay"
     },
     {
@@ -77,6 +80,28 @@
         }
       }
     },
+    "/api/session": {
+      "get": {
+        "tags": ["Operations"],
+        "summary": "Current authenticated session and role capabilities",
+        "description": "Returns the authenticated ShipSystem training-console identity, role, and UI capability hints. Capabilities are descriptive; server-side authorization remains authoritative.",
+        "responses": {
+          "200": {
+            "description": "Current session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/metrics": {
       "get": {
         "tags": ["Operations"],
@@ -88,6 +113,39 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/MetricsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/metrics/history": {
+      "get": {
+        "tags": ["Operations"],
+        "summary": "Recent operational capacity trend samples",
+        "description": "Returns the store-backed rolling trend window built from recent /metrics samples. Samples are for simulator capacity planning only.",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 48,
+              "maximum": 288
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Recent capacity trend samples",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MetricsHistorySample"
+                  }
                 }
               }
             }
@@ -109,6 +167,148 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/course-templates": {
+      "get": {
+        "tags": ["Course Templates"],
+        "summary": "List course templates",
+        "description": "Lists reusable training-only course templates from file and managed database sources.",
+        "responses": {
+          "200": {
+            "description": "Course templates",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CourseTemplate"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": ["Course Templates"],
+        "summary": "Create a managed course template",
+        "description": "Stores a reusable training-only course template. Templates package scenario setup, expected metadata, and report review checklist items; they do not provide tactical guidance.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CourseTemplate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created course template",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CourseTemplate"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/course-templates/{template_id}": {
+      "get": {
+        "tags": ["Course Templates"],
+        "summary": "Get one course template",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TemplateID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Course template",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CourseTemplate"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": ["Course Templates"],
+        "summary": "Update a managed course template",
+        "description": "File course templates are read-only; create or update managed database templates for deployment-specific course packages.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TemplateID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CourseTemplate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated course template",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CourseTemplate"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/course-templates/{template_id}/scenario": {
+      "post": {
+        "tags": ["Course Templates"],
+        "summary": "Create a managed scenario from a course template",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TemplateID"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created scenario summary",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScenarioSummary"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -1060,6 +1260,14 @@
           "type": "string"
         }
       },
+      "TemplateID": {
+        "name": "template_id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      },
       "Limit": {
         "name": "limit",
         "in": "query",
@@ -1239,6 +1447,44 @@
           }
         }
       },
+      "AssessmentRules": {
+        "type": "object",
+        "required": ["action_target", "replay_target", "action_weight", "replay_weight", "context_weight"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Optional label for configurable training-record completeness rules. Labels must preserve the training-only boundary."
+          },
+          "action_target": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "description": "Training action count target used for record-completeness assessment only."
+          },
+          "replay_target": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000,
+            "description": "Snapshot frame target used for after-action replay evidence completeness."
+          },
+          "action_weight": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "replay_weight": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "context_weight": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Weight for metadata, instructor notes, trainee list, and annotations. The three weights must sum to 100."
+          }
+        }
+      },
       "Scenario": {
         "type": "object",
         "required": ["name", "seed", "tick_hz", "snapshot_hz", "ownship", "sensors", "zones", "initial_contacts"],
@@ -1282,6 +1528,14 @@
           "initial_contacts": {
             "type": "integer"
           },
+          "assessment_profile": {
+            "type": "string",
+            "enum": ["standard", "quick_review", "extended_review"],
+            "description": "Optional training-record assessment profile. It changes abstract record-completeness targets and weights only; it is not tactical scoring."
+          },
+          "assessment_rules": {
+            "$ref": "#/components/schemas/AssessmentRules"
+          },
           "tracks": {
             "type": "array",
             "items": {
@@ -1317,6 +1571,73 @@
           },
           "version": {
             "type": "integer"
+          },
+          "source": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CourseChecklistItem": {
+        "type": "object",
+        "required": ["id", "label", "evidence"],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "string"
+          }
+        }
+      },
+      "CourseTemplate": {
+        "type": "object",
+        "required": ["id", "name", "training_only", "scenario", "expected_metadata", "review_checklist", "safety_notice", "enabled"],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "training_only": {
+            "type": "boolean",
+            "description": "Must be true. Course templates are for simulator training and audit workflows only."
+          },
+          "scenario": {
+            "$ref": "#/components/schemas/Scenario"
+          },
+          "expected_metadata": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "review_checklist": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CourseChecklistItem"
+            }
+          },
+          "safety_notice": {
+            "type": "string"
           },
           "source": {
             "type": "string"
@@ -2046,6 +2367,40 @@
           }
         }
       },
+      "SessionResponse": {
+        "type": "object",
+        "required": ["auth_mode", "authenticated", "role", "permissions", "safety_notice"],
+        "properties": {
+          "auth_mode": {
+            "type": "string",
+            "enum": ["off", "token", "proxy"]
+          },
+          "authenticated": {
+            "type": "boolean"
+          },
+          "user_id": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": ["viewer", "operator", "instructor", "admin"]
+          },
+          "role_source": {
+            "type": "string",
+            "enum": ["header", "map", "default", "compat_default", "token", "local"],
+            "description": "How the role was assigned for this session."
+          },
+          "permissions": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "boolean"
+            }
+          },
+          "safety_notice": {
+            "type": "string"
+          }
+        }
+      },
       "StoreStatus": {
         "type": "object",
         "required": ["store", "migration_version"],
@@ -2060,7 +2415,122 @@
       },
       "MetricsResponse": {
         "type": "object",
+        "properties": {
+          "sampled_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "snapshot_frames": {
+            "type": "integer"
+          },
+          "event_count": {
+            "type": "integer"
+          },
+          "track_point_count": {
+            "type": "integer"
+          },
+          "contact_count": {
+            "type": "integer"
+          },
+          "snapshot_capacity_pressure": {
+            "type": "number"
+          },
+          "event_capacity_pressure": {
+            "type": "number"
+          },
+          "track_point_capacity_pressure": {
+            "type": "number"
+          },
+          "snapshot_write_avg_ms": {
+            "type": "number"
+          },
+          "snapshot_write_max_ms": {
+            "type": "number"
+          },
+          "snapshot_write_failures": {
+            "type": "integer"
+          },
+          "db_table_bytes": {
+            "type": "integer",
+            "description": "Backing-store table bytes where available; memory mode reports zero."
+          },
+          "db_index_bytes": {
+            "type": "integer",
+            "description": "Backing-store index bytes where available; memory mode reports zero."
+          },
+          "db_total_bytes": {
+            "type": "integer",
+            "description": "Backing-store total bytes where available; memory mode reports zero."
+          },
+          "db_size_error": {
+            "type": "string"
+          }
+        },
         "additionalProperties": true
+      },
+      "MetricsHistorySample": {
+        "type": "object",
+        "required": [
+          "sampled_at",
+          "snapshot_frames",
+          "event_count",
+          "track_point_count",
+          "contact_count",
+          "snapshot_capacity_pressure",
+          "event_capacity_pressure",
+          "track_point_capacity_pressure",
+          "snapshot_write_avg_ms",
+          "snapshot_write_max_ms",
+          "snapshot_write_failures",
+          "db_table_bytes",
+          "db_index_bytes",
+          "db_total_bytes"
+        ],
+        "properties": {
+          "sampled_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "snapshot_frames": {
+            "type": "integer"
+          },
+          "event_count": {
+            "type": "integer"
+          },
+          "track_point_count": {
+            "type": "integer"
+          },
+          "contact_count": {
+            "type": "integer"
+          },
+          "snapshot_capacity_pressure": {
+            "type": "number"
+          },
+          "event_capacity_pressure": {
+            "type": "number"
+          },
+          "track_point_capacity_pressure": {
+            "type": "number"
+          },
+          "snapshot_write_avg_ms": {
+            "type": "number"
+          },
+          "snapshot_write_max_ms": {
+            "type": "number"
+          },
+          "snapshot_write_failures": {
+            "type": "integer"
+          },
+          "db_table_bytes": {
+            "type": "integer"
+          },
+          "db_index_bytes": {
+            "type": "integer"
+          },
+          "db_total_bytes": {
+            "type": "integer"
+          }
+        }
       },
       "ApiError": {
         "type": "object",

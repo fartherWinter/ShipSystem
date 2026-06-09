@@ -70,7 +70,7 @@ Release notes must include:
 - Data retention defaults and any capacity limits.
 - Known production risks or follow-up items.
 
-For releases that include database migrations, state whether the migration is additive or destructive. Destructive migrations require a preview plan and backup location before execution. `migrations/003_training_product.sql` is additive.
+For releases that include database migrations, state whether the migration is additive or destructive. Destructive migrations require a preview plan and backup location before execution. `migrations/003_training_product.sql`, `migrations/004_course_templates.sql`, and `migrations/005_metrics_history.sql` are additive.
 
 ## SBOM and Image Scanning
 

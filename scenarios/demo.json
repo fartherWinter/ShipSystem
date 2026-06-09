@@ -6,6 +6,7 @@
   "seed": 20260605,
   "tick_hz": 20,
   "snapshot_hz": 10,
+  "assessment_profile": "standard",
   "initial_contacts": 5,
   "ownship": {
     "lon": 121.5,

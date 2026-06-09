@@ -23,8 +23,10 @@ type Memory struct {
 	zones   map[string][]model.Zone
 	contact map[string][]model.Contact
 	scenes  map[string]model.ScenarioRecord
+	courses map[string]model.CourseTemplate
 	notes   map[string][]model.EventAnnotation
 	audit   []model.AuditLog
+	metrics []model.MetricsHistorySample
 }
 
 func NewMemory() *Memory {
@@ -37,6 +39,7 @@ func NewMemory() *Memory {
 		zones:   map[string][]model.Zone{},
 		contact: map[string][]model.Contact{},
 		scenes:  map[string]model.ScenarioRecord{},
+		courses: map[string]model.CourseTemplate{},
 		notes:   map[string][]model.EventAnnotation{},
 	}
 }
@@ -47,6 +50,32 @@ func (m *Memory) Name() string {
 
 func (m *Memory) Ready(_ context.Context) (model.StoreStatus, error) {
 	return model.StoreStatus{Store: m.Name(), MigrationVersion: 0}, nil
+}
+
+func (m *Memory) DataSize(_ context.Context) (model.StoreDataSize, error) {
+	return model.StoreDataSize{Store: m.Name()}, nil
+}
+
+func (m *Memory) SaveMetricsHistorySample(_ context.Context, sample model.MetricsHistorySample) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if sample.SampledAt.IsZero() {
+		sample.SampledAt = time.Now().UTC()
+	}
+	m.metrics = append(m.metrics, sample)
+	if overflow := len(m.metrics) - 288; overflow > 0 {
+		m.metrics = append([]model.MetricsHistorySample(nil), m.metrics[overflow:]...)
+	}
+	return nil
+}
+
+func (m *Memory) ListMetricsHistorySamples(_ context.Context, limit int) ([]model.MetricsHistorySample, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if limit <= 0 || limit > len(m.metrics) {
+		limit = len(m.metrics)
+	}
+	return append([]model.MetricsHistorySample(nil), m.metrics[len(m.metrics)-limit:]...), nil
 }
 
 func (m *Memory) SaveRun(_ context.Context, run model.Run) error {
@@ -164,7 +193,7 @@ func (m *Memory) SaveSnapshot(_ context.Context, snapshot model.Snapshot) error 
 	frame := snapshotFrame(snapshot)
 	m.snaps[snapshot.RunID] = append(m.snaps[snapshot.RunID], frame)
 	m.tracks[snapshot.RunID] = cloneTracks(snapshot.Tracks)
-	m.contact[snapshot.RunID] = cloneContacts(snapshot.Contacts)
+	m.contact[snapshot.RunID] = append(m.contact[snapshot.RunID], cloneContacts(snapshot.Contacts)...)
 	for _, track := range snapshot.Tracks {
 		m.points[snapshot.RunID] = append(m.points[snapshot.RunID], model.TrackPoint{
 			TrackID:    track.ID,
@@ -242,6 +271,18 @@ func (m *Memory) SnapshotRange(_ context.Context, runID string) (model.SnapshotR
 		To:    frames[len(frames)-1].SampledAt,
 		Count: len(frames),
 	}, true, nil
+}
+
+func (m *Memory) RunDataCounts(_ context.Context, runID string) (model.RunDataCounts, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return model.RunDataCounts{
+		RunID:       runID,
+		Events:      len(m.events[runID]),
+		TrackPoints: len(m.points[runID]),
+		Contacts:    len(m.contact[runID]),
+		Snapshots:   len(m.snaps[runID]),
+	}, nil
 }
 
 func (m *Memory) ListTracks(_ context.Context, runID string) ([]model.Track, error) {
@@ -355,6 +396,58 @@ func (m *Memory) SetScenarioEnabled(_ context.Context, id string, enabled bool, 
 	}
 	m.scenes[id] = record
 	return scenarioSummary(record), nil
+}
+
+func (m *Memory) ListCourseTemplates(_ context.Context) ([]model.CourseTemplate, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	templates := make([]model.CourseTemplate, 0, len(m.courses))
+	for _, template := range m.courses {
+		templates = append(templates, cloneCourseTemplate(template))
+	}
+	sort.Slice(templates, func(i, j int) bool {
+		if templates[i].Name != templates[j].Name {
+			return templates[i].Name < templates[j].Name
+		}
+		return templates[i].ID < templates[j].ID
+	})
+	return templates, nil
+}
+
+func (m *Memory) GetCourseTemplate(_ context.Context, id string) (model.CourseTemplate, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	template, ok := m.courses[id]
+	if !ok {
+		return model.CourseTemplate{}, errors.New("course template not found")
+	}
+	return cloneCourseTemplate(template), nil
+}
+
+func (m *Memory) SaveCourseTemplate(_ context.Context, template model.CourseTemplate) (model.CourseTemplate, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := time.Now().UTC()
+	if template.ID == "" {
+		template.ID = uuid.NewString()
+	}
+	if template.Source == "" {
+		template.Source = "database"
+	}
+	if !template.Enabled && template.UpdatedAt.IsZero() {
+		template.Enabled = true
+	}
+	if template.CreatedAt.IsZero() {
+		if existing, ok := m.courses[template.ID]; ok {
+			template.CreatedAt = existing.CreatedAt
+		} else {
+			template.CreatedAt = now
+		}
+	}
+	template.UpdatedAt = now
+	template = cloneCourseTemplate(template)
+	m.courses[template.ID] = template
+	return cloneCourseTemplate(template), nil
 }
 
 func (m *Memory) SaveEventAnnotation(_ context.Context, annotation model.EventAnnotation) (model.EventAnnotation, error) {
@@ -717,6 +810,18 @@ func cloneScenario(s model.Scenario) model.Scenario {
 	out.Tracks = append([]model.Track(nil), s.Tracks...)
 	out.Contacts = append([]model.Contact(nil), s.Contacts...)
 	out.AllowedActions = append([]string(nil), s.AllowedActions...)
+	if s.AssessmentRules != nil {
+		rules := *s.AssessmentRules
+		out.AssessmentRules = &rules
+	}
+	return out
+}
+
+func cloneCourseTemplate(template model.CourseTemplate) model.CourseTemplate {
+	out := template
+	out.Scenario = cloneScenario(template.Scenario)
+	out.ExpectedMetadata = cloneMap(template.ExpectedMetadata)
+	out.ReviewChecklist = append([]model.CourseChecklistItem(nil), template.ReviewChecklist...)
 	return out
 }
 

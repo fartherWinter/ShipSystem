@@ -64,6 +64,15 @@ Estimate only, without creating runs:
 
 The script exercises 5, 20, and 100 simulated tracks at 10 Hz snapshot rate by default. It creates training-only runs, starts them, optionally submits abstract training actions, stops them, and reads each report's actual snapshot count.
 
+The console Capacity panel and `/metrics` endpoint expose sampled counts for
+snapshots, events, track points, and raw contacts. Snapshot, event, and track
+point rows also show pressure against the configured per-run caps, which helps
+operators spot storage-heavy runs before pruning is needed. The console also
+keeps a rolling in-session trend window for count growth, snapshot write
+latency, and backing-store table/index/total bytes. Treat the trend as an
+operator dashboard for recent growth direction; use Prometheus or database
+monitoring for long-term retention planning.
+
 ## Growth Estimates
 
 At `snapshot_hz=10`, one continuously running training run produces these row counts per day:
@@ -88,4 +97,26 @@ Recommended starting points:
 - Small team training, 5-20 tracks: 7-30 days plus per-run caps.
 - High-density 100-track tests: 1-7 days, shorter per-run caps, and explicit database capacity monitoring.
 
-Future hardening can add partitioning by time/run and offline archive exports. Until then, use preview plus backups before destructive maintenance.
+## Archive Before Prune
+
+Completed long exercises should be exported before destructive retention pruning:
+
+```powershell
+.\scripts\export-run-archive.ps1 -RunID <run-id>
+.\scripts\export-run-archive.ps1 -RunID <run-id> -Compress
+.\scripts\export-run-archive.ps1 -RunID <run-id> -Compress -UploadUrl $env:SHIP_SIM_ARCHIVE_UPLOAD_URL
+```
+
+The archive is a read-only local bundle with report exports, run metadata, events, annotations, audit logs, tracks, zones, snapshot pages, track-point pages, and a manifest. This provides a practical cold-storage handoff path while the live database remains optimized for recent replay and review.
+
+Use `-Compress` to create `outputs/run-<run-id>-archive.zip` for cold-storage transfer. Add `-UploadUrl` to PUT that zip to a pre-signed object-store URL, and `-UploadHeader "Name: Value"` for provider-specific headers. Add `-RemoveUncompressed` only after confirming the zip is the intended handoff artifact.
+
+Use `-SkipSnapshots` or `-SkipTrackPoints` only when a report-only archive is an explicit retention decision. Keep the manifest with any external storage object so reviewers can tell which evidence classes were exported.
+
+Restore replay evidence from a compressed bundle when a retained database no longer has the needed snapshots:
+
+```powershell
+go run ./cmd/archive-restore -archive outputs/run-<run-id>-archive.zip -database-url $env:DATABASE_URL
+```
+
+The restore command imports run metadata, events, snapshots, derived track points, annotations, and audit entries. It refuses to append into a run that already has replay data unless `-allow-append` is set. Keep database backups before destructive maintenance; archive restore is a cold-storage replay recovery path, not a replacement for backup/restore.

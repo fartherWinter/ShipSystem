@@ -6,6 +6,14 @@ ShipSystem exposes a training, demonstration, replay, and audit API only. The AP
 
 The OpenAPI contract is `docs/openapi.json`. It covers the current HTTP API, report export, retention operations, and the WebSocket snapshot message shape.
 
+`GET /metrics` returns additive operational fields such as `sampled_at`,
+storage counts, capacity pressures, snapshot write latency, and backing-store
+table/index/total bytes. These fields are for simulator capacity planning and
+must not be wired to real operational systems.
+`GET /metrics/history` returns the store-backed rolling trend window built from
+recent `/metrics` samples so the console can restore capacity trends after a
+browser refresh or app restart when PostgreSQL mode is used.
+
 Generate frontend TypeScript types from the contract:
 
 ```powershell
@@ -37,6 +45,14 @@ When changing an API payload, update `docs/openapi.json`, regenerate frontend ty
 
 Stage 9 training product routes are still training/demo/audit routes:
 
+- `GET /api/session` returns the current auth mode, user, role, role source,
+  and descriptive permission flags for console display. Server authorization remains
+  authoritative.
+- `GET /api/course-templates` lists file and managed course templates.
+- `POST /api/course-templates` creates a managed course template.
+- `GET /api/course-templates/{template_id}` reads one course template.
+- `PUT /api/course-templates/{template_id}` updates a managed course template. File templates are read-only.
+- `POST /api/course-templates/{template_id}/scenario` creates a managed scenario from an enabled course template.
 - `POST /api/scenarios` stores a validated managed scenario.
 - `PUT /api/scenarios/{scenario_id}` updates managed database scenarios. Built-in and file scenarios are read-only templates.
 - `POST /api/scenarios/{scenario_id}/copy` copies any visible scenario into a managed scenario version.
@@ -48,6 +64,9 @@ Stage 9 training product routes are still training/demo/audit routes:
 Disabled scenarios remain readable for audit and can be re-enabled, but cannot be used to create new runs.
 
 `RunReport.version: 2` adds `annotations`, `assessment`, and `audit_logs`. The assessment is an abstract training-record completeness score; it must not be used or described as real tactical advice.
+`Scenario.assessment_profile` is optional and currently accepts `standard`, `quick_review`, or `extended_review`. It changes report assessment completeness targets only and is not a tactical scoring mode.
+`Scenario.assessment_rules` can override the preset with bounded action/replay targets and action/replay/context weights that sum to 100. It is training-record completeness configuration only.
+Course templates package validated scenario setup, assessment rules, expected metadata, and review checklist prompts for training records. They must not include tactical recommendations, operational readiness scoring, or real-device procedures.
 
 ## Error Shape
 
@@ -68,11 +87,13 @@ Common error codes:
 | Code | Meaning |
 | --- | --- |
 | `unauthorized` | Authentication is missing, invalid, or a WebSocket ticket is missing. |
+| `forbidden` | The authenticated role is not allowed to perform the requested mutation. |
 | `origin_not_allowed` | CORS or WebSocket origin is not allowed. |
 | `method_not_allowed` | HTTP method is unsupported for the route. |
 | `invalid_json` | Request JSON is malformed, too large, has unknown fields, or is not a single object. |
 | `validation_failed` | Scenario, run, or training-action validation failed; details may list field errors. |
 | `scenario_not_found` | Requested scenario id does not exist. |
+| `course_template_not_found` | Requested course template id does not exist. |
 | `run_not_found` | Requested run is absent or not visible to the authenticated user. |
 | `snapshot_not_found` | No snapshot exists near the requested time. |
 | `invalid_time_range` | A time query parameter is not RFC3339. |

@@ -60,6 +60,12 @@ func main() {
 	} else {
 		logger.Info("scenarios loaded", "dir", cfg.ScenarioDir, "count", count)
 	}
+	if count, err := manager.LoadCourseTemplateDir(cfg.CourseTemplateDir); err != nil {
+		logger.Error("load course templates failed", "dir", cfg.CourseTemplateDir, "error", err)
+		os.Exit(1)
+	} else {
+		logger.Info("course templates loaded", "dir", cfg.CourseTemplateDir, "count", count)
+	}
 	policy := modelRetentionPolicy(cfg, time.Now().UTC())
 	if retentionPolicyEmpty(policy) {
 		logger.Info("retention prune skipped; no retention policy configured")

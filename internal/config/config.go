@@ -25,7 +25,11 @@ type Config struct {
 	AuthMode              string
 	AuthToken             string
 	AuthUserHeader        string
+	AuthRoleHeader        string
+	AuthDefaultRole       string
+	AuthRoleMap           map[string]string
 	ScenarioDir           string
+	CourseTemplateDir     string
 	StaticDir             string
 	RequestBodyLimit      int64
 	RetentionDays         int
@@ -47,7 +51,9 @@ func Default() Config {
 		Environment:           EnvDev,
 		AuthMode:              AuthOff,
 		AuthUserHeader:        "X-Forwarded-User",
+		AuthRoleHeader:        "X-Forwarded-Role",
 		ScenarioDir:           "scenarios",
+		CourseTemplateDir:     "course-templates",
 		RequestBodyLimit:      1 << 20,
 		RetentionDays:         0,
 		RetentionInterval:     0,
@@ -72,10 +78,16 @@ func Load() (Config, error) {
 	cfg.AuthMode = env("SHIP_SIM_AUTH_MODE", cfg.AuthMode)
 	cfg.AuthToken = os.Getenv("SHIP_SIM_AUTH_TOKEN")
 	cfg.AuthUserHeader = env("SHIP_SIM_AUTH_USER_HEADER", cfg.AuthUserHeader)
+	cfg.AuthRoleHeader = env("SHIP_SIM_AUTH_ROLE_HEADER", cfg.AuthRoleHeader)
+	cfg.AuthDefaultRole = env("SHIP_SIM_AUTH_DEFAULT_ROLE", cfg.AuthDefaultRole)
 	cfg.ScenarioDir = env("SHIP_SIM_SCENARIO_DIR", cfg.ScenarioDir)
+	cfg.CourseTemplateDir = env("SHIP_SIM_COURSE_TEMPLATE_DIR", cfg.CourseTemplateDir)
 	cfg.StaticDir = os.Getenv("SHIP_SIM_STATIC_DIR")
 	var parseErrs []string
 	var err error
+	if cfg.AuthRoleMap, err = roleMapEnv("SHIP_SIM_AUTH_ROLE_MAP"); err != nil {
+		parseErrs = append(parseErrs, err.Error())
+	}
 	if cfg.RequestBodyLimit, err = int64Env("SHIP_SIM_REQUEST_BODY_LIMIT", cfg.RequestBodyLimit); err != nil {
 		parseErrs = append(parseErrs, err.Error())
 	}
@@ -159,6 +171,17 @@ func (c Config) Validate() error {
 	if c.SnapshotWriteTimeout <= 0 {
 		details = append(details, "SHIP_SIM_SNAPSHOT_WRITE_TIMEOUT must be greater than zero")
 	}
+	if strings.TrimSpace(c.AuthDefaultRole) != "" && !validAuthRole(c.AuthDefaultRole) {
+		details = append(details, "SHIP_SIM_AUTH_DEFAULT_ROLE must be one of viewer, operator, instructor, admin")
+	}
+	for user, role := range c.AuthRoleMap {
+		if strings.TrimSpace(user) == "" {
+			details = append(details, "SHIP_SIM_AUTH_ROLE_MAP users must not be empty")
+		}
+		if !validAuthRole(role) {
+			details = append(details, "SHIP_SIM_AUTH_ROLE_MAP roles must be one of viewer, operator, instructor, admin")
+		}
+	}
 	switch c.AuthMode {
 	case AuthOff:
 		if strings.EqualFold(c.Environment, EnvProd) {
@@ -228,6 +251,41 @@ func csvEnv(key string) []string {
 		}
 	}
 	return values
+}
+
+func roleMapEnv(key string) (map[string]string, error) {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return nil, nil
+	}
+	items := strings.Split(raw, ",")
+	out := make(map[string]string, len(items))
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		user, role, ok := strings.Cut(item, "=")
+		if !ok {
+			user, role, ok = strings.Cut(item, ":")
+		}
+		user = strings.TrimSpace(user)
+		role = strings.TrimSpace(role)
+		if !ok || user == "" || role == "" {
+			return nil, errors.New(key + " entries must use user=role or user:role")
+		}
+		out[user] = strings.ToLower(role)
+	}
+	return out, nil
+}
+
+func validAuthRole(role string) bool {
+	switch strings.ToLower(strings.TrimSpace(strings.Split(role, ",")[0])) {
+	case "viewer", "operator", "instructor", "admin":
+		return true
+	default:
+		return false
+	}
 }
 
 func int64Env(key string, fallback int64) (int64, error) {

@@ -2,16 +2,26 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ApiRequestError,
   clearApiToken,
+  createCourseTemplate,
+  createScenarioFromCourseTemplate,
   createWebSocketTicket,
   downloadRunReport,
+  getCourseTemplate,
+  getMetrics,
+  getMetricsHistory,
   getNearestSnapshot,
+  getRun,
   getRunReport,
+  getSession,
+  listCourseTemplates,
   listSnapshots,
   reportDownloadPath,
   reportFilename,
   setApiToken,
+  updateCourseTemplate,
   toWsUrl
 } from "./api";
+import type { CourseTemplate } from "./types";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -84,6 +94,22 @@ describe("api client helpers", () => {
     expect(err.details).toHaveLength(1);
   });
 
+  it("keeps report export error details", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+      ok: false,
+      status: 403,
+      statusText: "Forbidden",
+      text: async () => JSON.stringify({ error: { code: "forbidden", message: "role denied", details: ["viewer cannot export"] } })
+    } as Response);
+
+    await expect(downloadRunReport("run-1", "pdf")).rejects.toMatchObject({
+      status: 403,
+      code: "forbidden",
+      message: "role denied",
+      details: ["viewer cannot export"]
+    });
+  });
+
   it("calls snapshot and report endpoints", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: true,
@@ -120,8 +146,109 @@ describe("api client helpers", () => {
       ok: true,
       text: async () => "{}"
     } as Response);
+    await getRun("run-1");
+
+    expect(fetchMock).toHaveBeenLastCalledWith("http://localhost:8080/api/runs/run-1", expect.any(Object));
+
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      text: async () => "{}"
+    } as Response);
     await getRunReport("run-1");
 
     expect(fetchMock).toHaveBeenLastCalledWith("http://localhost:8080/api/runs/run-1/report", expect.any(Object));
+
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      text: async () => "{\"snapshot_frames\":12}"
+    } as Response);
+    await getMetrics();
+
+    expect(fetchMock).toHaveBeenLastCalledWith("http://localhost:8080/metrics", expect.any(Object));
+
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      text: async () => "[]"
+    } as Response);
+    await getMetricsHistory(24);
+
+    expect(fetchMock).toHaveBeenLastCalledWith("http://localhost:8080/metrics/history?limit=24", expect.any(Object));
+
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      text: async () => "{\"auth_mode\":\"off\",\"authenticated\":true,\"role\":\"instructor\",\"permissions\":{},\"safety_notice\":\"Training only\"}"
+    } as Response);
+    await getSession();
+
+    expect(fetchMock).toHaveBeenLastCalledWith("http://localhost:8080/api/session", expect.any(Object));
+  });
+
+  it("calls course template endpoints", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      text: async () => "[]"
+    } as Response);
+    const template = sampleCourseTemplate();
+
+    await listCourseTemplates();
+
+    expect(fetchMock).toHaveBeenLastCalledWith("http://localhost:8080/api/course-templates", expect.any(Object));
+
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      text: async () => JSON.stringify(template)
+    } as Response);
+    await getCourseTemplate("quick review");
+
+    expect(fetchMock).toHaveBeenLastCalledWith("http://localhost:8080/api/course-templates/quick%20review", expect.any(Object));
+
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      text: async () => JSON.stringify(template)
+    } as Response);
+    await createCourseTemplate(template);
+
+    expect(fetchMock).toHaveBeenLastCalledWith("http://localhost:8080/api/course-templates", expect.objectContaining({ method: "POST" }));
+
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      text: async () => JSON.stringify(template)
+    } as Response);
+    await updateCourseTemplate("quick review", template);
+
+    expect(fetchMock).toHaveBeenLastCalledWith("http://localhost:8080/api/course-templates/quick%20review", expect.objectContaining({ method: "PUT" }));
+
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      text: async () => "{}"
+    } as Response);
+    await createScenarioFromCourseTemplate("quick review");
+
+    expect(fetchMock).toHaveBeenLastCalledWith("http://localhost:8080/api/course-templates/quick%20review/scenario", expect.objectContaining({ method: "POST" }));
   });
 });
+
+function sampleCourseTemplate(): CourseTemplate {
+  return {
+    id: "quick-review",
+    name: "Quick Review",
+    training_only: true,
+    scenario: {
+      name: "Quick Review Scenario",
+      seed: 7,
+      tick_hz: 10,
+      snapshot_hz: 2,
+      ownship: { lon: 121.5, lat: 31.2, alt_m: 0 },
+      sensors: [],
+      zones: [],
+      initial_contacts: 1
+    },
+    expected_metadata: {
+      profile: "quick_review"
+    },
+    review_checklist: [{ id: "timeline", label: "Review timeline", evidence: "Report timeline" }],
+    safety_notice: "Training simulation only.",
+    source: "database",
+    enabled: true
+  };
+}
