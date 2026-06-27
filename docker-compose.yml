@@ -1,0 +1,92 @@
+services:
+  postgres:
+    image: postgis/postgis:17-3.5
+    environment:
+      POSTGRES_DB: shipsystem
+      POSTGRES_USER: shipsystem
+      POSTGRES_PASSWORD: shipsystem
+      TZ: Asia/Shanghai
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shipsystem -d shipsystem"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: ./backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      PORT: 8080
+      DATABASE_DSN: host=postgres user=shipsystem password=shipsystem dbname=shipsystem port=5432 sslmode=disable TimeZone=Asia/Shanghai
+      DATABASE_AUTO_MIGRATE: ${DATABASE_AUTO_MIGRATE:-true}
+      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-true}
+      ANALYTICS_BASE_URL: http://analytics:8090
+      ANALYTICS_ADMIN_TOKEN: ${ANALYTICS_ADMIN_TOKEN:-}
+      GO_API_TOKEN: ${GO_API_TOKEN:-}
+      ANALYTICS_HTTP_TIMEOUT: ${ANALYTICS_HTTP_TIMEOUT:-10s}
+      REQUEST_BODY_LIMIT_BYTES: ${REQUEST_BODY_LIMIT_BYTES:-1048576}
+      HTTP_READ_TIMEOUT: ${HTTP_READ_TIMEOUT:-15s}
+      HTTP_READ_HEADER_TIMEOUT: ${HTTP_READ_HEADER_TIMEOUT:-5s}
+      HTTP_WRITE_TIMEOUT: ${HTTP_WRITE_TIMEOUT:-30s}
+      HTTP_IDLE_TIMEOUT: ${HTTP_IDLE_TIMEOUT:-60s}
+      HTTP_SHUTDOWN_TIMEOUT: ${HTTP_SHUTDOWN_TIMEOUT:-10s}
+      JWT_SECRET: ${JWT_SECRET:-dev-only-change-me}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Admin123!}
+      JWT_TTL_HOURS: ${JWT_TTL_HOURS:-24}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost:3000,http://localhost}
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/ready >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  analytics:
+    build: ./analytics
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      GO_API_BASE: http://backend:8080/api/v1
+      GO_API_TOKEN: ${GO_API_TOKEN:-}
+      ANALYTICS_ADMIN_TOKEN: ${ANALYTICS_ADMIN_TOKEN:-}
+      SIM_INTERVAL_SECONDS: ${SIM_INTERVAL_SECONDS:-3}
+      BATTLE_INTERVAL_SECONDS: ${BATTLE_INTERVAL_SECONDS:-1.2}
+      HTTP_RETRY_ATTEMPTS: ${HTTP_RETRY_ATTEMPTS:-3}
+      HTTP_TIMEOUT_SECONDS: ${HTTP_TIMEOUT_SECONDS:-10}
+      HTTP_RETRY_BACKOFF_SECONDS: ${HTTP_RETRY_BACKOFF_SECONDS:-0.2}
+      HTTP_RETRY_BACKOFF_MAX_SECONDS: ${HTTP_RETRY_BACKOFF_MAX_SECONDS:-2}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost:3000,http://localhost}
+    ports:
+      - "8090:8090"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8090/health', timeout=3).read()\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  frontend:
+    build: ./frontend
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "3000:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/ >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:

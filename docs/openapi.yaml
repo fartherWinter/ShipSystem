@@ -1,0 +1,1906 @@
+openapi: 3.0.3
+info:
+  title: ShipSystem API
+  version: 0.2.0
+  description: |
+    Production-facing REST contract for the ShipSystem Go API.
+    Protected operations inherit the global cookie-or-bearer security requirement.
+    Each operation also declares its effective RBAC scope in `x-roles`.
+servers:
+  - url: /api/v1
+security:
+  - cookieAuth: []
+  - bearerAuth: []
+tags:
+  - name: Auth
+  - name: Ships
+  - name: Alarms
+  - name: Dispatch
+  - name: Battle
+  - name: Analytics
+  - name: RBAC
+paths:
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Login and set the auth cookie
+      security: []
+      x-roles: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Login succeeded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Clear the auth cookie
+      security: []
+      x-roles: []
+      responses:
+        "204":
+          description: Logout succeeded
+  /ships:
+    get:
+      tags: [Ships]
+      summary: List ships
+      x-roles: [admin, dispatcher, viewer]
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Size"
+        - $ref: "#/components/parameters/Keyword"
+      responses:
+        "200":
+          description: Paged ships
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShipPageResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+    post:
+      tags: [Ships]
+      summary: Create a ship
+      x-roles: [admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ShipUpsertRequest"
+      responses:
+        "201":
+          description: Ship created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ship"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /ships/{id}:
+    get:
+      tags: [Ships]
+      summary: Get a ship
+      x-roles: [admin, dispatcher, viewer]
+      parameters:
+        - $ref: "#/components/parameters/NumericId"
+      responses:
+        "200":
+          description: Ship detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ship"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+    put:
+      tags: [Ships]
+      summary: Update a ship
+      x-roles: [admin]
+      parameters:
+        - $ref: "#/components/parameters/NumericId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ShipUpsertRequest"
+      responses:
+        "200":
+          description: Ship updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ship"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+    delete:
+      tags: [Ships]
+      summary: Soft delete a ship
+      x-roles: [admin]
+      parameters:
+        - $ref: "#/components/parameters/NumericId"
+      responses:
+        "204":
+          description: Ship deleted or already absent
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /ships/{id}/locations:
+    post:
+      tags: [Ships]
+      summary: Report a ship location
+      x-roles: [admin, dispatcher, analytics_service]
+      parameters:
+        - $ref: "#/components/parameters/NumericId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ShipLocationReportRequest"
+      responses:
+        "201":
+          description: Location stored, with an optional alarm
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LocationReportResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /ships/{id}/tracks:
+    get:
+      tags: [Ships]
+      summary: List ship track points
+      x-roles: [admin, dispatcher, viewer]
+      parameters:
+        - $ref: "#/components/parameters/NumericId"
+        - $ref: "#/components/parameters/StartTime"
+        - $ref: "#/components/parameters/EndTime"
+      responses:
+        "200":
+          description: Ship track points
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrackListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /alarms:
+    get:
+      tags: [Alarms]
+      summary: List alarms
+      x-roles: [admin, dispatcher, viewer]
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Size"
+        - $ref: "#/components/parameters/AlarmStatus"
+      responses:
+        "200":
+          description: Paged alarms
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AlarmPageResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /alarms/{id}/ack:
+    put:
+      tags: [Alarms]
+      summary: Acknowledge an alarm idempotently
+      x-roles: [admin, dispatcher]
+      parameters:
+        - $ref: "#/components/parameters/NumericId"
+      responses:
+        "200":
+          description: Alarm after ACK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Alarm"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /dispatch-events:
+    get:
+      tags: [Dispatch]
+      summary: List dispatch events
+      x-roles: [admin, dispatcher, viewer]
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Size"
+        - $ref: "#/components/parameters/DispatchStatus"
+      responses:
+        "200":
+          description: Paged dispatch events
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DispatchEventPageResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+    post:
+      tags: [Dispatch]
+      summary: Create a dispatch event
+      x-roles: [admin, dispatcher]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DispatchEventCreateRequest"
+      responses:
+        "201":
+          description: Dispatch event created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DispatchEvent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /dispatch-events/{id}/status:
+    put:
+      tags: [Dispatch]
+      summary: Update dispatch event status idempotently
+      x-roles: [admin, dispatcher]
+      parameters:
+        - $ref: "#/components/parameters/NumericId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DispatchStatusUpdateRequest"
+      responses:
+        "200":
+          description: Dispatch event after transition
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DispatchEvent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /battle/scenarios:
+    get:
+      tags: [Battle]
+      summary: List built-in battle scenarios
+      x-roles: [admin, dispatcher, viewer]
+      responses:
+        "200":
+          description: Battle scenarios
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BattleScenarioListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /battle/sessions:
+    get:
+      tags: [Battle]
+      summary: List battle sessions
+      x-roles: [admin, dispatcher, viewer]
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Size"
+      responses:
+        "200":
+          description: Paged battle sessions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BattleSessionPageResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+    post:
+      tags: [Battle]
+      summary: Create a battle session
+      x-roles: [admin, dispatcher]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BattleSessionCreateRequest"
+      responses:
+        "201":
+          description: Battle session created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BattleSessionCreateResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /battle/sessions/{sessionId}/timeline:
+    get:
+      tags: [Battle]
+      summary: List battle snapshot timeline
+      x-roles: [admin, dispatcher, viewer]
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200":
+          description: Battle timeline items
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BattleTimelineResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /battle/sessions/{sessionId}/snapshots:
+    get:
+      tags: [Battle]
+      summary: List battle snapshots
+      x-roles: [admin, dispatcher, viewer]
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+        - $ref: "#/components/parameters/FromTick"
+        - $ref: "#/components/parameters/ToTick"
+      responses:
+        "200":
+          description: Battle snapshots
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BattleSnapshotListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /battle/sessions/{sessionId}/report:
+    get:
+      tags: [Battle]
+      summary: Get the battle report
+      x-roles: [admin, dispatcher, viewer]
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200":
+          description: Battle report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BattleReport"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /battle/sessions/{sessionId}/state:
+    get:
+      tags: [Battle]
+      summary: Get the current battle state
+      x-roles: [admin, dispatcher, viewer]
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200":
+          description: Battle state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BattleState"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /battle/sessions/{sessionId}/stop:
+    post:
+      tags: [Battle]
+      summary: Stop a battle session idempotently
+      x-roles: [admin, dispatcher]
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200":
+          description: Battle state after stop
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BattleState"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /radar/reports:
+    post:
+      tags: [Battle]
+      summary: Receive an analytics radar report callback
+      x-roles: [admin, dispatcher, analytics_service]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RadarReportPayload"
+      responses:
+        "202":
+          description: Radar report accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BattleState"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /analytics/simulate/status:
+    get:
+      tags: [Analytics]
+      summary: Get analytics simulator status
+      x-roles: [admin, dispatcher]
+      responses:
+        "200":
+          description: Analytics status payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalyticsProxyResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "502":
+          $ref: "#/components/responses/AnalyticsServiceFailure"
+  /analytics/simulate/start:
+    post:
+      tags: [Analytics]
+      summary: Start the location simulator
+      x-roles: [admin, dispatcher]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SimulationStartRequest"
+      responses:
+        "200":
+          description: Analytics response payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalyticsProxyResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "502":
+          $ref: "#/components/responses/AnalyticsServiceFailure"
+  /analytics/simulate/stop:
+    post:
+      tags: [Analytics]
+      summary: Stop the location simulator
+      x-roles: [admin, dispatcher]
+      responses:
+        "200":
+          description: Analytics response payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalyticsProxyResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "502":
+          $ref: "#/components/responses/AnalyticsServiceFailure"
+  /analytics/simulate/battle/start:
+    post:
+      tags: [Analytics]
+      summary: Start the battle simulator
+      x-roles: [admin, dispatcher]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BattleSimulationStartRequest"
+      responses:
+        "200":
+          description: Analytics response payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalyticsProxyResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "502":
+          $ref: "#/components/responses/AnalyticsServiceFailure"
+  /analytics/simulate/battle/stop:
+    post:
+      tags: [Analytics]
+      summary: Stop the battle simulator
+      x-roles: [admin, dispatcher]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BattleSimulationStopRequest"
+      responses:
+        "200":
+          description: Analytics response payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalyticsProxyResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "502":
+          $ref: "#/components/responses/AnalyticsServiceFailure"
+  /rbac/users:
+    get:
+      tags: [RBAC]
+      summary: List users
+      x-roles: [super_admin]
+      responses:
+        "200":
+          description: Users
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /rbac/roles:
+    get:
+      tags: [RBAC]
+      summary: List roles
+      x-roles: [super_admin]
+      responses:
+        "200":
+          description: Roles
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoleListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /rbac/menus:
+    get:
+      tags: [RBAC]
+      summary: List menus
+      x-roles: [super_admin]
+      responses:
+        "200":
+          description: Menus
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MenuListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: shipsystem_token
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    NumericId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+    SessionId:
+      name: sessionId
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+    Page:
+      name: page
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    Size:
+      name: size
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    Keyword:
+      name: keyword
+      in: query
+      required: false
+      schema:
+        type: string
+    AlarmStatus:
+      name: status
+      in: query
+      required: false
+      schema:
+        type: string
+        enum: [OPEN, ACKED]
+    DispatchStatus:
+      name: status
+      in: query
+      required: false
+      schema:
+        type: string
+        enum: [NEW, ASSIGNED, IN_PROGRESS, RESOLVED, CLOSED]
+    StartTime:
+      name: start
+      in: query
+      required: false
+      schema:
+        type: string
+        format: date-time
+    EndTime:
+      name: end
+      in: query
+      required: false
+      schema:
+        type: string
+        format: date-time
+    FromTick:
+      name: from
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 0
+    ToTick:
+      name: to
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 0
+  responses:
+    BadRequest:
+      description: Invalid request parameters or JSON body
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Unauthorized:
+      description: Missing, invalid, or rejected authentication
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Forbidden:
+      description: The authenticated role is not allowed to access this operation
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    NotFound:
+      description: Target resource was not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    InternalServerError:
+      description: Unexpected backend failure
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    AnalyticsServiceFailure:
+      description: Analytics upstream request failed
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/AnalyticsErrorResponse"
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+          example: request is invalid
+        requestId:
+          type: string
+          description: Backend request correlation ID.
+          example: req-9f4cbe51
+    AnalyticsErrorResponse:
+      allOf:
+        - $ref: "#/components/schemas/ErrorResponse"
+        - type: object
+          required: [message, upstreamStatus]
+          properties:
+            upstreamStatus:
+              type: integer
+              example: 503
+            upstreamRequestId:
+              type: string
+              example: ana-7d4f79
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          minLength: 1
+          example: admin
+        password:
+          type: string
+          minLength: 1
+          example: Admin123!
+    LoginResponse:
+      type: object
+      required: [token, user, menus]
+      properties:
+        token:
+          type: string
+          description: JWT also set as the `shipsystem_token` HttpOnly cookie.
+        user:
+          $ref: "#/components/schemas/User"
+        menus:
+          type: array
+          items:
+            $ref: "#/components/schemas/Menu"
+    Role:
+      type: object
+      required: [id, name, code, description, createdAt, updatedAt]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        code:
+          type: string
+          example: admin
+        description:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    Menu:
+      type: object
+      required: [id, name, path, icon, sort, createdAt, updatedAt]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        path:
+          type: string
+          example: /monitor
+        icon:
+          type: string
+        parentId:
+          type: integer
+          nullable: true
+        sort:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    User:
+      type: object
+      required: [id, username, displayName, roleId, role, status, createdAt, updatedAt]
+      properties:
+        id:
+          type: integer
+        username:
+          type: string
+        displayName:
+          type: string
+        roleId:
+          type: integer
+        role:
+          $ref: "#/components/schemas/Role"
+        status:
+          type: string
+          example: enabled
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    Ship:
+      type: object
+      required: [id, name, mmsi, shipType, flag, lengthM, widthM, status, createdAt, updatedAt]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+          example: HaiXun-01
+        mmsi:
+          type: string
+          example: "412345678"
+        shipType:
+          type: string
+          example: patrol
+        flag:
+          type: string
+          example: CN
+        lengthM:
+          type: number
+          format: double
+        widthM:
+          type: number
+          format: double
+        status:
+          type: string
+          example: active
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    ShipUpsertRequest:
+      type: object
+      required: [name, mmsi]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        mmsi:
+          type: string
+          minLength: 1
+        shipType:
+          type: string
+        flag:
+          type: string
+        lengthM:
+          type: number
+          format: double
+        widthM:
+          type: number
+          format: double
+        status:
+          type: string
+      example:
+        name: HaiXun-01
+        mmsi: "412345678"
+        shipType: patrol
+        flag: CN
+        lengthM: 110.0
+        widthM: 16.0
+        status: active
+    ShipLocation:
+      type: object
+      required: [id, shipId, longitude, latitude, speedKnots, course, reportedAt, createdAt]
+      properties:
+        id:
+          type: integer
+        shipId:
+          type: integer
+        longitude:
+          type: number
+          format: double
+        latitude:
+          type: number
+          format: double
+        speedKnots:
+          type: number
+          format: double
+        course:
+          type: number
+          format: double
+        reportedAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+    ShipLocationReportRequest:
+      type: object
+      required: [longitude, latitude]
+      properties:
+        longitude:
+          type: number
+          format: double
+          minimum: -180
+          maximum: 180
+        latitude:
+          type: number
+          format: double
+          minimum: -90
+          maximum: 90
+        speedKnots:
+          type: number
+          format: double
+          minimum: 0
+        course:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 359.999999
+        reportedAt:
+          type: string
+          format: date-time
+      example:
+        longitude: 121.5102
+        latitude: 31.2204
+        speedKnots: 15.5
+        course: 90
+        reportedAt: 2026-06-09T10:00:00Z
+    LocationReportResponse:
+      type: object
+      required: [location]
+      properties:
+        location:
+          $ref: "#/components/schemas/ShipLocation"
+        alarm:
+          allOf:
+            - $ref: "#/components/schemas/Alarm"
+          nullable: true
+    Alarm:
+      type: object
+      required: [id, shipId, type, level, title, message, status, createdAt, updatedAt]
+      properties:
+        id:
+          type: integer
+        shipId:
+          type: integer
+        ship:
+          allOf:
+            - $ref: "#/components/schemas/Ship"
+          nullable: true
+        type:
+          type: string
+          example: OVERSPEED
+        level:
+          type: string
+          example: WARN
+        title:
+          type: string
+        message:
+          type: string
+        longitude:
+          type: number
+          format: double
+          nullable: true
+        latitude:
+          type: number
+          format: double
+          nullable: true
+        status:
+          type: string
+          example: OPEN
+        ackBy:
+          type: integer
+          nullable: true
+        ackAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    DispatchEvent:
+      type: object
+      required: [id, title, description, status, priority, createdAt, updatedAt]
+      properties:
+        id:
+          type: integer
+        shipId:
+          type: integer
+          nullable: true
+        ship:
+          allOf:
+            - $ref: "#/components/schemas/Ship"
+          nullable: true
+        title:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+          example: NEW
+        priority:
+          type: string
+          example: normal
+        handlerUserId:
+          type: integer
+          nullable: true
+        createdById:
+          type: integer
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    DispatchEventCreateRequest:
+      type: object
+      required: [title]
+      properties:
+        shipId:
+          type: integer
+          minimum: 1
+        title:
+          type: string
+          minLength: 1
+        description:
+          type: string
+        status:
+          type: string
+        priority:
+          type: string
+      example:
+        shipId: 1
+        title: Intercept suspicious target
+        description: Dispatch a patrol vessel to grid A3.
+        status: NEW
+        priority: high
+    DispatchStatusUpdateRequest:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          minLength: 1
+          example: IN_PROGRESS
+        remark:
+          type: string
+      example:
+        status: RESOLVED
+        remark: Boarding team reported situation under control.
+    BattleScenario:
+      type: object
+      required: [code, name, description, originLongitude, originLatitude, blueUnits, redUnits, radarRangeKm, weaponRangeKm]
+      properties:
+        code:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        originLongitude:
+          type: number
+          format: double
+        originLatitude:
+          type: number
+          format: double
+        blueUnits:
+          type: integer
+        redUnits:
+          type: integer
+        radarRangeKm:
+          type: number
+          format: double
+        weaponRangeKm:
+          type: number
+          format: double
+    BattleSession:
+      type: object
+      required: [id, sessionId, name, scenarioCode, status, startedAt, createdAt, updatedAt]
+      properties:
+        id:
+          type: integer
+        sessionId:
+          type: string
+        name:
+          type: string
+        scenarioCode:
+          type: string
+        status:
+          type: string
+          example: running
+        startedAt:
+          type: string
+          format: date-time
+        stoppedAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastScanAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    BattleSessionCreateRequest:
+      type: object
+      properties:
+        scenarioCode:
+          type: string
+          example: open-water-duel
+    RadarTarget:
+      type: object
+      required: [sessionId, radarId, targetId, side, longitude, latitude, course, speedKnots, confidence, detected, scanTime, createdAt]
+      properties:
+        id:
+          type: integer
+        sessionId:
+          type: string
+        radarId:
+          type: string
+        targetId:
+          type: string
+        side:
+          type: string
+        longitude:
+          type: number
+          format: double
+        latitude:
+          type: number
+          format: double
+        course:
+          type: number
+          format: double
+        speedKnots:
+          type: number
+          format: double
+        confidence:
+          type: number
+          format: double
+        detected:
+          type: boolean
+        scanTime:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+    BattleUnit:
+      type: object
+      required: [sessionId, unitId, shipId, name, side, hp, maxHp, radarRangeKm, weaponRangeKm, cooldownSeconds, longitude, latitude, course, speedKnots, status, createdAt, updatedAt]
+      properties:
+        id:
+          type: integer
+        sessionId:
+          type: string
+        unitId:
+          type: string
+        shipId:
+          type: integer
+        name:
+          type: string
+        side:
+          type: string
+        hp:
+          type: number
+          format: double
+        maxHp:
+          type: number
+          format: double
+        radarRangeKm:
+          type: number
+          format: double
+        weaponRangeKm:
+          type: number
+          format: double
+        cooldownSeconds:
+          type: number
+          format: double
+        longitude:
+          type: number
+          format: double
+        latitude:
+          type: number
+          format: double
+        course:
+          type: number
+          format: double
+        speedKnots:
+          type: number
+          format: double
+        status:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    BattleProjectile:
+      type: object
+      required: [sessionId, projectileId, sourceUnitId, targetUnitId, side, longitude, latitude, speedKmH, status, createdAt, updatedAt]
+      properties:
+        id:
+          type: integer
+        sessionId:
+          type: string
+        projectileId:
+          type: string
+        sourceUnitId:
+          type: string
+        targetUnitId:
+          type: string
+        side:
+          type: string
+        longitude:
+          type: number
+          format: double
+        latitude:
+          type: number
+          format: double
+        speedKmH:
+          type: number
+          format: double
+        status:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    BattleEvent:
+      type: object
+      required: [sessionId, eventId, type, severity, message, sourceUnitId, targetUnitId, occurredAt, createdAt]
+      properties:
+        id:
+          type: integer
+        sessionId:
+          type: string
+        eventId:
+          type: string
+        type:
+          type: string
+        severity:
+          type: string
+        message:
+          type: string
+        sourceUnitId:
+          type: string
+        targetUnitId:
+          type: string
+        longitude:
+          type: number
+          format: double
+          nullable: true
+        latitude:
+          type: number
+          format: double
+          nullable: true
+        occurredAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+    BattleState:
+      type: object
+      required: [sessionId, status, units, projectiles, events, radarTargets, updatedAt]
+      properties:
+        sessionId:
+          type: string
+        status:
+          type: string
+        units:
+          type: array
+          items:
+            $ref: "#/components/schemas/BattleUnit"
+        projectiles:
+          type: array
+          items:
+            $ref: "#/components/schemas/BattleProjectile"
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/BattleEvent"
+        radarTargets:
+          type: array
+          items:
+            $ref: "#/components/schemas/RadarTarget"
+        updatedAt:
+          type: string
+          format: date-time
+    BattleTimelineEventSummary:
+      type: object
+      required: [type, severity, message, sourceUnitId, targetUnitId]
+      properties:
+        type:
+          type: string
+        severity:
+          type: string
+        message:
+          type: string
+        sourceUnitId:
+          type: string
+        targetUnitId:
+          type: string
+    BattleTimelineItem:
+      type: object
+      required: [tick, snapshotTime, eventCount, events]
+      properties:
+        tick:
+          type: integer
+        snapshotTime:
+          type: string
+          format: date-time
+        eventCount:
+          type: integer
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/BattleTimelineEventSummary"
+    BattleSnapshot:
+      type: object
+      required: [id, sessionId, tick, snapshotTime, units, projectiles, radarTargets, events]
+      properties:
+        id:
+          type: integer
+        sessionId:
+          type: string
+        tick:
+          type: integer
+        snapshotTime:
+          type: string
+          format: date-time
+        units:
+          type: array
+          items:
+            $ref: "#/components/schemas/BattleUnit"
+        projectiles:
+          type: array
+          items:
+            $ref: "#/components/schemas/BattleProjectile"
+        radarTargets:
+          type: array
+          items:
+            $ref: "#/components/schemas/RadarTarget"
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/BattleEvent"
+    BattleDamageStat:
+      type: object
+      required: [unitId, name, side, maxHp, hp, damageTaken, status]
+      properties:
+        unitId:
+          type: string
+        name:
+          type: string
+        side:
+          type: string
+        maxHp:
+          type: number
+          format: double
+        hp:
+          type: number
+          format: double
+        damageTaken:
+          type: number
+          format: double
+        status:
+          type: string
+    BattleReport:
+      type: object
+      required: [session, winner, firedCount, hitCount, destroyedCount, damageRanking, keyEvents]
+      properties:
+        session:
+          $ref: "#/components/schemas/BattleSession"
+        winner:
+          type: string
+        firedCount:
+          type: integer
+        hitCount:
+          type: integer
+        destroyedCount:
+          type: integer
+        damageRanking:
+          type: array
+          items:
+            $ref: "#/components/schemas/BattleDamageStat"
+        keyEvents:
+          type: array
+          items:
+            $ref: "#/components/schemas/BattleEvent"
+    BattleSessionCreateResponse:
+      type: object
+      required: [session, state]
+      properties:
+        session:
+          $ref: "#/components/schemas/BattleSession"
+        state:
+          $ref: "#/components/schemas/BattleState"
+    RadarTargetPayload:
+      type: object
+      required: [targetId, side, longitude, latitude, course, speedKnots, confidence, detected]
+      properties:
+        targetId:
+          type: string
+        side:
+          type: string
+        longitude:
+          type: number
+          format: double
+        latitude:
+          type: number
+          format: double
+        course:
+          type: number
+          format: double
+        speedKnots:
+          type: number
+          format: double
+        confidence:
+          type: number
+          format: double
+        detected:
+          type: boolean
+    BattleUnitPayload:
+      type: object
+      required: [unitId, shipId, name, side, hp, maxHp, radarRangeKm, weaponRangeKm, cooldownSeconds, longitude, latitude, course, speedKnots, status]
+      properties:
+        unitId:
+          type: string
+        shipId:
+          type: integer
+        name:
+          type: string
+        side:
+          type: string
+        hp:
+          type: number
+          format: double
+        maxHp:
+          type: number
+          format: double
+        radarRangeKm:
+          type: number
+          format: double
+        weaponRangeKm:
+          type: number
+          format: double
+        cooldownSeconds:
+          type: number
+          format: double
+        longitude:
+          type: number
+          format: double
+        latitude:
+          type: number
+          format: double
+        course:
+          type: number
+          format: double
+        speedKnots:
+          type: number
+          format: double
+        status:
+          type: string
+    BattleProjectilePayload:
+      type: object
+      required: [projectileId, sourceUnitId, targetUnitId, side, longitude, latitude, speedKmH, status]
+      properties:
+        projectileId:
+          type: string
+        sourceUnitId:
+          type: string
+        targetUnitId:
+          type: string
+        side:
+          type: string
+        longitude:
+          type: number
+          format: double
+        latitude:
+          type: number
+          format: double
+        speedKmH:
+          type: number
+          format: double
+        status:
+          type: string
+    BattleEventPayload:
+      type: object
+      required: [eventId, type, severity, message, sourceUnitId, targetUnitId]
+      properties:
+        eventId:
+          type: string
+        type:
+          type: string
+        severity:
+          type: string
+        message:
+          type: string
+        sourceUnitId:
+          type: string
+        targetUnitId:
+          type: string
+        longitude:
+          type: number
+          format: double
+          nullable: true
+        latitude:
+          type: number
+          format: double
+          nullable: true
+        occurredAt:
+          type: string
+          format: date-time
+          nullable: true
+    BattleStatePayload:
+      type: object
+      required: [sessionId, status, units, projectiles, events]
+      properties:
+        sessionId:
+          type: string
+        status:
+          type: string
+        units:
+          type: array
+          items:
+            $ref: "#/components/schemas/BattleUnitPayload"
+        projectiles:
+          type: array
+          items:
+            $ref: "#/components/schemas/BattleProjectilePayload"
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/BattleEventPayload"
+        updatedAt:
+          type: string
+          format: date-time
+          nullable: true
+    RadarReportPayload:
+      type: object
+      required: [sessionId, radarId, targets]
+      properties:
+        sessionId:
+          type: string
+        radarId:
+          type: string
+        scanTime:
+          type: string
+          format: date-time
+          nullable: true
+        targets:
+          type: array
+          maxItems: 500
+          items:
+            $ref: "#/components/schemas/RadarTargetPayload"
+        state:
+          allOf:
+            - $ref: "#/components/schemas/BattleStatePayload"
+          nullable: true
+      example:
+        sessionId: battle-1749455812345678900
+        radarId: blue-radar-1
+        scanTime: 2026-06-09T10:00:02Z
+        targets:
+          - targetId: red-ship-1
+            side: red
+            longitude: 121.501
+            latitude: 31.231
+            course: 225
+            speedKnots: 18
+            confidence: 0.96
+            detected: true
+    SimulationStartRequest:
+      type: object
+      properties:
+        shipIds:
+          type: array
+          items:
+            type: integer
+            minimum: 1
+        originLongitude:
+          type: number
+          format: double
+        originLatitude:
+          type: number
+          format: double
+      example:
+        shipIds: [1, 2]
+    BattleSimulationStartRequest:
+      type: object
+      required: [sessionId, originLongitude, originLatitude]
+      properties:
+        sessionId:
+          type: string
+          minLength: 1
+        scenarioCode:
+          type: string
+          description: Defaults to `open-water-duel` when omitted or blank.
+        originLongitude:
+          type: number
+          format: double
+          minimum: -180
+          maximum: 180
+        originLatitude:
+          type: number
+          format: double
+          minimum: -90
+          maximum: 90
+        seed:
+          type: integer
+      example:
+        sessionId: battle-1749455812345678900
+        scenarioCode: open-water-duel
+        originLongitude: 121.49
+        originLatitude: 31.23
+        seed: 7
+    BattleSimulationStopRequest:
+      type: object
+      required: [sessionId]
+      properties:
+        sessionId:
+          type: string
+          minLength: 1
+      example:
+        sessionId: battle-1749455812345678900
+    AnalyticsProxyResponse:
+      type: object
+      additionalProperties: true
+      example:
+        status: running
+        requestId: ana-7d4f79
+    ShipPageResult:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Ship"
+        total:
+          type: integer
+    AlarmPageResult:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Alarm"
+        total:
+          type: integer
+    DispatchEventPageResult:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/DispatchEvent"
+        total:
+          type: integer
+    BattleSessionPageResult:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/BattleSession"
+        total:
+          type: integer
+    TrackListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ShipLocation"
+    UserListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/User"
+    RoleListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Role"
+    MenuListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Menu"
+    BattleScenarioListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/BattleScenario"
+    BattleTimelineResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/BattleTimelineItem"
+    BattleSnapshotListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/BattleSnapshot"
