@@ -33,6 +33,25 @@ RUNTIME_SMOKE_CHECK = Check(
 )
 
 
+CAPACITY_ESTIMATE_CHECK = Check(
+    "capacity estimate",
+    [
+        sys.executable,
+        "scripts/run_capacity_smoke.py",
+        "--estimate-only",
+        "--track-counts",
+        "5,20,100",
+        "--ticks",
+        "6",
+        "--duration-seconds",
+        "30",
+        "--action-every-ticks",
+        "2",
+    ],
+    ROOT,
+)
+
+
 def main() -> int:
     args = parse_args()
     checks = selected_checks(args)
@@ -79,6 +98,7 @@ def parse_args() -> argparse.Namespace:
             "db-integration",
             "backup-restore-drill",
             "retention-preview",
+            "capacity-estimate",
         ),
         help="Run only selected checks. Can be passed multiple times.",
     )
@@ -111,6 +131,11 @@ def parse_args() -> argparse.Namespace:
         "--include-compose-override",
         action="store_true",
         help="Generate a local docker compose override with free host ports. Does not start the stack.",
+    )
+    parser.add_argument(
+        "--include-capacity-estimate",
+        action="store_true",
+        help="Run the estimate-only battle replay capacity projection used to size retention thresholds.",
     )
     return parser.parse_args()
 
@@ -165,20 +190,28 @@ def selected_checks(args: argparse.Namespace) -> list[Check]:
             ROOT,
         ),
         "retention-preview": Check("retention preview", [sys.executable, "scripts/retention_maintenance.py"], ROOT),
+        "capacity-estimate": CAPACITY_ESTIMATE_CHECK,
     }
-    include_db_integration = args.include_db_integration or (args.only is not None and "db-integration" in args.only)
+    include_db_integration = flag_enabled(args, "include_db_integration") or (args.only is not None and "db-integration" in args.only)
     if include_db_integration:
         checks["db-integration"] = repository_integration_check()
-    include_runtime_observability_snapshot = args.include_runtime_observability_snapshot or (
+    include_runtime_observability_snapshot = flag_enabled(args, "include_runtime_observability_snapshot") or (
         args.only is not None and "runtime-observability-snapshot" in args.only
     )
-    include_backup_restore_drill = args.include_backup_restore_drill or (
+    include_backup_restore_drill = flag_enabled(args, "include_backup_restore_drill") or (
         args.only is not None and "backup-restore-drill" in args.only
     )
-    include_compose_override = args.include_compose_override or (args.only is not None and "compose-override" in args.only)
-    include_retention_preview = args.include_retention_preview or (args.only is not None and "retention-preview" in args.only)
+    include_compose_override = flag_enabled(args, "include_compose_override") or (
+        args.only is not None and "compose-override" in args.only
+    )
+    include_retention_preview = flag_enabled(args, "include_retention_preview") or (
+        args.only is not None and "retention-preview" in args.only
+    )
+    include_capacity_estimate = flag_enabled(args, "include_capacity_estimate") or (
+        args.only is not None and "capacity-estimate" in args.only
+    )
     extra_checks: list[Check] = []
-    if args.include_runtime_smoke:
+    if flag_enabled(args, "include_runtime_smoke"):
         extra_checks.extend([checks["runtime-precheck"], RUNTIME_SMOKE_CHECK])
     if include_runtime_observability_snapshot:
         extra_checks.append(checks["runtime-observability-snapshot"])
@@ -190,6 +223,8 @@ def selected_checks(args: argparse.Namespace) -> list[Check]:
         extra_checks.append(checks["compose-override"])
     if include_retention_preview:
         extra_checks.append(checks["retention-preview"])
+    if include_capacity_estimate:
+        extra_checks.append(checks["capacity-estimate"])
     if not args.only:
         selected = [
             checks["go"],
@@ -279,6 +314,10 @@ def quote_part(part: str) -> str:
 
 def tool_path(name: str) -> str:
     return shutil.which(name) or name
+
+
+def flag_enabled(args: argparse.Namespace, name: str) -> bool:
+    return bool(getattr(args, name, False))
 
 
 def relay_completed_output(completed: subprocess.CompletedProcess[str]) -> None:

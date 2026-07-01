@@ -22,12 +22,78 @@ def completed(stdout: str = "", stderr: str = "", returncode: int = 0):
 
 class CollectReleaseEvidenceScriptTest(unittest.TestCase):
     def test_selected_steps_default_and_runtime_modes(self) -> None:
-        default_steps = MODULE.selected_steps(include_runtime=False, include_runtime_precheck=False, include_db_integration=False, include_backup_restore_drill=False, include_runtime_observability_snapshot=False)
-        runtime_steps = MODULE.selected_steps(include_runtime=True, include_runtime_precheck=False, include_db_integration=False, include_backup_restore_drill=False, include_runtime_observability_snapshot=False)
-        runtime_precheck_steps = MODULE.selected_steps(include_runtime=False, include_runtime_precheck=True, include_db_integration=False, include_backup_restore_drill=False, include_runtime_observability_snapshot=False)
-        db_steps = MODULE.selected_steps(include_runtime=False, include_runtime_precheck=False, include_db_integration=True, include_backup_restore_drill=False, include_runtime_observability_snapshot=False)
-        backup_steps = MODULE.selected_steps(include_runtime=False, include_runtime_precheck=False, include_db_integration=False, include_backup_restore_drill=True, include_runtime_observability_snapshot=False)
-        observability_steps = MODULE.selected_steps(include_runtime=False, include_runtime_precheck=False, include_db_integration=False, include_backup_restore_drill=False, include_runtime_observability_snapshot=True)
+        default_steps = MODULE.selected_steps(
+            include_runtime=False,
+            include_runtime_precheck=False,
+            include_db_integration=False,
+            include_backup_restore_drill=False,
+            include_runtime_observability_snapshot=False,
+            include_retention_preview=False,
+            include_capacity_estimate=False,
+        )
+        runtime_steps = MODULE.selected_steps(
+            include_runtime=True,
+            include_runtime_precheck=False,
+            include_db_integration=False,
+            include_backup_restore_drill=False,
+            include_runtime_observability_snapshot=False,
+            include_retention_preview=False,
+            include_capacity_estimate=False,
+        )
+        runtime_precheck_steps = MODULE.selected_steps(
+            include_runtime=False,
+            include_runtime_precheck=True,
+            include_db_integration=False,
+            include_backup_restore_drill=False,
+            include_runtime_observability_snapshot=False,
+            include_retention_preview=False,
+            include_capacity_estimate=False,
+        )
+        db_steps = MODULE.selected_steps(
+            include_runtime=False,
+            include_runtime_precheck=False,
+            include_db_integration=True,
+            include_backup_restore_drill=False,
+            include_runtime_observability_snapshot=False,
+            include_retention_preview=False,
+            include_capacity_estimate=False,
+        )
+        backup_steps = MODULE.selected_steps(
+            include_runtime=False,
+            include_runtime_precheck=False,
+            include_db_integration=False,
+            include_backup_restore_drill=True,
+            include_runtime_observability_snapshot=False,
+            include_retention_preview=False,
+            include_capacity_estimate=False,
+        )
+        observability_steps = MODULE.selected_steps(
+            include_runtime=False,
+            include_runtime_precheck=False,
+            include_db_integration=False,
+            include_backup_restore_drill=False,
+            include_runtime_observability_snapshot=True,
+            include_retention_preview=False,
+            include_capacity_estimate=False,
+        )
+        retention_steps = MODULE.selected_steps(
+            include_runtime=False,
+            include_runtime_precheck=False,
+            include_db_integration=False,
+            include_backup_restore_drill=False,
+            include_runtime_observability_snapshot=False,
+            include_retention_preview=True,
+            include_capacity_estimate=False,
+        )
+        capacity_steps = MODULE.selected_steps(
+            include_runtime=False,
+            include_runtime_precheck=False,
+            include_db_integration=False,
+            include_backup_restore_drill=False,
+            include_runtime_observability_snapshot=False,
+            include_retention_preview=False,
+            include_capacity_estimate=True,
+        )
 
         self.assertEqual(["migration-status", "preflight"], [item.name for item in default_steps])
         self.assertEqual(
@@ -43,6 +109,50 @@ class CollectReleaseEvidenceScriptTest(unittest.TestCase):
         self.assertEqual("03-backup-restore-drill.txt", backup_steps[-1].output_file)
         self.assertEqual(["migration-status", "preflight", "runtime-observability-snapshot"], [item.name for item in observability_steps])
         self.assertEqual("03-runtime-observability-snapshot.txt", observability_steps[-1].output_file)
+        self.assertEqual(["migration-status", "preflight", "retention-preview"], [item.name for item in retention_steps])
+        self.assertEqual("03-retention-preview.txt", retention_steps[-1].output_file)
+        self.assertEqual(["migration-status", "preflight", "capacity-estimate"], [item.name for item in capacity_steps])
+        self.assertEqual("03-capacity-estimate.txt", capacity_steps[-1].output_file)
+
+    def test_selected_steps_stacks_optional_evidence_in_stable_order(self) -> None:
+        steps = MODULE.selected_steps(
+            include_runtime=True,
+            include_runtime_precheck=True,
+            include_db_integration=True,
+            include_backup_restore_drill=True,
+            include_runtime_observability_snapshot=True,
+            include_retention_preview=True,
+            include_capacity_estimate=True,
+        )
+
+        self.assertEqual(
+            [
+                "migration-status",
+                "preflight",
+                "runtime-precheck",
+                "smoke-check",
+                "db-integration",
+                "backup-restore-drill",
+                "runtime-observability-snapshot",
+                "retention-preview",
+                "capacity-estimate",
+            ],
+            [item.name for item in steps],
+        )
+        self.assertEqual(
+            [
+                "01-migrate-status.txt",
+                "02-preflight.txt",
+                "03-runtime-precheck.txt",
+                "04-smoke-check.txt",
+                "05-db-integration.txt",
+                "06-backup-restore-drill.txt",
+                "07-runtime-observability-snapshot.txt",
+                "08-retention-preview.txt",
+                "09-capacity-estimate.txt",
+            ],
+            [item.output_file for item in steps],
+        )
 
     def test_run_step_writes_output_file_and_returns_result(self) -> None:
         step = MODULE.EvidenceStep("preflight", [sys.executable, "scripts/preflight_check.py"], ROOT, "02-preflight.txt")
@@ -66,6 +176,9 @@ class CollectReleaseEvidenceScriptTest(unittest.TestCase):
                 include_db_integration=False,
                 include_backup_restore_drill=False,
                 include_runtime_observability_snapshot=False,
+                include_retention_preview=False,
+                include_capacity_estimate=False,
+                continue_on_failure=False,
             )
             fake_steps = [
                 MODULE.EvidenceStep("migration-status", ["go"], ROOT, "01-migrate-status.txt"),
@@ -95,6 +208,9 @@ class CollectReleaseEvidenceScriptTest(unittest.TestCase):
                 include_db_integration=True,
                 include_backup_restore_drill=True,
                 include_runtime_observability_snapshot=True,
+                include_retention_preview=True,
+                include_capacity_estimate=True,
+                continue_on_failure=False,
             )
             fake_steps = [MODULE.EvidenceStep("smoke-check", ["python"], ROOT, "04-smoke-check.txt")]
             fake_result = MODULE.StepResult("smoke-check", ["python"], str(ROOT), "04-smoke-check.txt", 0)
@@ -111,7 +227,45 @@ class CollectReleaseEvidenceScriptTest(unittest.TestCase):
         self.assertTrue(manifest["includeDbIntegration"])
         self.assertTrue(manifest["includeBackupRestoreDrill"])
         self.assertTrue(manifest["includeRuntimeObservabilitySnapshot"])
+        self.assertTrue(manifest["includeRetentionPreview"])
+        self.assertTrue(manifest["includeCapacityEstimate"])
         self.assertEqual("smoke-check", manifest["steps"][0]["name"])
+
+    def test_main_can_continue_collecting_after_failure_when_enabled(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            args = MODULE.argparse.Namespace(
+                output_dir=tmpdir,
+                include_runtime=False,
+                include_runtime_precheck=False,
+                include_db_integration=False,
+                include_backup_restore_drill=False,
+                include_runtime_observability_snapshot=False,
+                include_retention_preview=True,
+                include_capacity_estimate=True,
+                continue_on_failure=True,
+            )
+            fake_steps = [
+                MODULE.EvidenceStep("migration-status", ["go"], ROOT, "01-migrate-status.txt"),
+                MODULE.EvidenceStep("retention-preview", ["python"], ROOT, "03-retention-preview.txt"),
+                MODULE.EvidenceStep("capacity-estimate", ["python"], ROOT, "04-capacity-estimate.txt"),
+            ]
+            fake_results = [
+                MODULE.StepResult("migration-status", ["go"], str(ROOT), "01-migrate-status.txt", 1),
+                MODULE.StepResult("retention-preview", ["python"], str(ROOT), "03-retention-preview.txt", 0),
+                MODULE.StepResult("capacity-estimate", ["python"], str(ROOT), "04-capacity-estimate.txt", 0),
+            ]
+            with mock.patch.object(MODULE, "parse_args", return_value=args):
+                with mock.patch.object(MODULE, "selected_steps", return_value=fake_steps):
+                    with mock.patch.object(MODULE, "run_step", side_effect=fake_results):
+                        exit_code = MODULE.main()
+
+            manifest = json.loads((Path(tmpdir) / "manifest.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(1, exit_code)
+        self.assertEqual(
+            ["migration-status", "retention-preview", "capacity-estimate"],
+            [item["name"] for item in manifest["steps"]],
+        )
 
 
 if __name__ == "__main__":

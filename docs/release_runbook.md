@@ -54,6 +54,13 @@ python scripts/preflight_check.py --only retention-preview
 python scripts/preflight_check.py --include-retention-preview
 ```
 
+濡傛灉闇€瑕佹妸鐣欏瓨棰勮杈撳嚭鐩存帴褰掓。鍒板彂甯冭瘉鎹紝鍙互浣跨敤锛?
+```bash
+python scripts/collect_release_evidence.py --include-retention-preview --output-dir .release-evidence/latest-retention-preview
+```
+
+鑻ュ彧鏄仛宸℃/璇婃柇锛屽笇鏈涘墠缃?migrate 鎴?preflight 澶辫触鏃朵粛缁х画褰掓。鍚庣画璇佹嵁锛屽彲浠ヨ拷鍔?`--continue-on-failure`銆?
+
 
 若需要在调整留存阈值前先量化 battle/radar 数据增长速度，先执行容量估算：
 ```bash
@@ -63,6 +70,11 @@ python scripts/run_capacity_smoke.py --estimate-only
 若预生产栈已启动，也可以执行一次轻量真实采样，读取 battle timeline、snapshots 和 report，作为留存参数或容量预算证据：
 ```bash
 python scripts/run_capacity_smoke.py --track-counts 5,20 --ticks 6 --duration-seconds 30
+```
+
+濡傛灉鍙渶瑕佹妸 estimate-only 瀹归噺棰勪及褰掓。鍒板彂甯冭瘉鎹紝鍙互浣跨敤锛?
+```bash
+python scripts/collect_release_evidence.py --include-capacity-estimate --output-dir .release-evidence/latest-capacity-estimate
 ```
 
 ## 3. 鏁版嵁搴撹縼绉?

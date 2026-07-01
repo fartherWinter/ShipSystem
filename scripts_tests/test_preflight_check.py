@@ -27,6 +27,7 @@ class PreflightCheckScriptTest(unittest.TestCase):
             include_backup_restore_drill=False,
             include_compose_override=False,
             include_retention_preview=False,
+            include_capacity_estimate=False,
         )
 
         checks = MODULE.selected_checks(args)
@@ -58,6 +59,7 @@ class PreflightCheckScriptTest(unittest.TestCase):
             include_backup_restore_drill=False,
             include_compose_override=False,
             include_retention_preview=False,
+            include_capacity_estimate=False,
         )
 
         checks = MODULE.selected_checks(args)
@@ -78,6 +80,7 @@ class PreflightCheckScriptTest(unittest.TestCase):
             include_backup_restore_drill=False,
             include_compose_override=False,
             include_retention_preview=False,
+            include_capacity_estimate=False,
         )
 
         checks = MODULE.selected_checks(args)
@@ -95,6 +98,7 @@ class PreflightCheckScriptTest(unittest.TestCase):
             include_backup_restore_drill=False,
             include_compose_override=False,
             include_retention_preview=False,
+            include_capacity_estimate=False,
         )
 
         checks = MODULE.selected_checks(args)
@@ -110,6 +114,7 @@ class PreflightCheckScriptTest(unittest.TestCase):
             include_backup_restore_drill=False,
             include_compose_override=False,
             include_retention_preview=False,
+            include_capacity_estimate=False,
         )
 
         checks = MODULE.selected_checks(args)
@@ -125,6 +130,7 @@ class PreflightCheckScriptTest(unittest.TestCase):
             include_backup_restore_drill=False,
             include_compose_override=False,
             include_retention_preview=False,
+            include_capacity_estimate=False,
         )
 
         checks = MODULE.selected_checks(args)
@@ -141,6 +147,7 @@ class PreflightCheckScriptTest(unittest.TestCase):
             include_backup_restore_drill=False,
             include_compose_override=False,
             include_retention_preview=False,
+            include_capacity_estimate=False,
         )
 
         checks = MODULE.selected_checks(args)
@@ -157,6 +164,7 @@ class PreflightCheckScriptTest(unittest.TestCase):
             include_backup_restore_drill=False,
             include_compose_override=False,
             include_retention_preview=False,
+            include_capacity_estimate=False,
         )
 
         dsn = "host=localhost user=shipsystem password=shipsystem dbname=shipsystem_test"
@@ -175,6 +183,7 @@ class PreflightCheckScriptTest(unittest.TestCase):
             include_backup_restore_drill=True,
             include_compose_override=False,
             include_retention_preview=False,
+            include_capacity_estimate=False,
         )
 
         checks = MODULE.selected_checks(args)
@@ -191,6 +200,7 @@ class PreflightCheckScriptTest(unittest.TestCase):
             include_backup_restore_drill=False,
             include_compose_override=True,
             include_retention_preview=False,
+            include_capacity_estimate=False,
         )
 
         checks = MODULE.selected_checks(args)
@@ -207,12 +217,31 @@ class PreflightCheckScriptTest(unittest.TestCase):
             include_backup_restore_drill=False,
             include_compose_override=False,
             include_retention_preview=True,
+            include_capacity_estimate=False,
         )
 
         checks = MODULE.selected_checks(args)
         names = [check.name for check in checks]
 
         self.assertEqual(["go tests", "retention preview"], names)
+
+    def test_only_go_with_capacity_estimate_appends_estimate(self) -> None:
+        args = argparse.Namespace(
+            only=["go"],
+            include_runtime_smoke=False,
+            include_db_integration=False,
+            include_runtime_observability_snapshot=False,
+            include_backup_restore_drill=False,
+            include_compose_override=False,
+            include_retention_preview=False,
+            include_capacity_estimate=True,
+        )
+
+        checks = MODULE.selected_checks(args)
+        names = [check.name for check in checks]
+
+        self.assertEqual(["go tests", "capacity estimate"], names)
+        self.assertIn("--estimate-only", checks[-1].command)
 
     def test_runtime_smoke_summary_is_printed_only_when_check_is_selected(self) -> None:
         args = argparse.Namespace(
@@ -223,6 +252,7 @@ class PreflightCheckScriptTest(unittest.TestCase):
             include_backup_restore_drill=False,
             include_compose_override=False,
             include_retention_preview=False,
+            include_capacity_estimate=False,
         )
 
         checks = MODULE.selected_checks(args)
@@ -238,6 +268,7 @@ class PreflightCheckScriptTest(unittest.TestCase):
             include_backup_restore_drill=False,
             include_compose_override=True,
             include_retention_preview=False,
+            include_capacity_estimate=False,
         )
 
         checks = MODULE.selected_checks(args)
@@ -255,6 +286,7 @@ class PreflightCheckScriptTest(unittest.TestCase):
             include_backup_restore_drill=False,
             include_compose_override=False,
             include_retention_preview=True,
+            include_capacity_estimate=False,
         )
 
         checks = MODULE.selected_checks(args)
@@ -273,6 +305,7 @@ class PreflightCheckScriptTest(unittest.TestCase):
             include_backup_restore_drill=False,
             include_compose_override=False,
             include_retention_preview=False,
+            include_capacity_estimate=False,
         )
 
         checks = MODULE.selected_checks(args)
@@ -290,6 +323,7 @@ class PreflightCheckScriptTest(unittest.TestCase):
             include_backup_restore_drill=False,
             include_compose_override=False,
             include_retention_preview=False,
+            include_capacity_estimate=False,
         )
 
         checks = MODULE.selected_checks(args)
@@ -297,6 +331,57 @@ class PreflightCheckScriptTest(unittest.TestCase):
         self.assertEqual(1, len(checks))
         self.assertEqual("retention preview", checks[0].name)
         self.assertEqual([sys.executable, "scripts/retention_maintenance.py"], checks[0].command)
+
+    def test_capacity_estimate_is_opt_in_for_default_preflight(self) -> None:
+        args = argparse.Namespace(
+            only=None,
+            include_runtime_smoke=False,
+            include_db_integration=False,
+            include_runtime_observability_snapshot=False,
+            include_backup_restore_drill=False,
+            include_compose_override=False,
+            include_retention_preview=False,
+            include_capacity_estimate=True,
+        )
+
+        checks = MODULE.selected_checks(args)
+        names = [check.name for check in checks]
+
+        self.assertIn("capacity estimate", names)
+        self.assertEqual("capacity estimate", names[-1])
+
+    def test_only_capacity_estimate_selects_estimate_script(self) -> None:
+        args = argparse.Namespace(
+            only=["capacity-estimate"],
+            include_runtime_smoke=False,
+            include_db_integration=False,
+            include_runtime_observability_snapshot=False,
+            include_backup_restore_drill=False,
+            include_compose_override=False,
+            include_retention_preview=False,
+            include_capacity_estimate=False,
+        )
+
+        checks = MODULE.selected_checks(args)
+
+        self.assertEqual(1, len(checks))
+        self.assertEqual("capacity estimate", checks[0].name)
+        self.assertEqual(
+            [
+                sys.executable,
+                "scripts/run_capacity_smoke.py",
+                "--estimate-only",
+                "--track-counts",
+                "5,20,100",
+                "--ticks",
+                "6",
+                "--duration-seconds",
+                "30",
+                "--action-every-ticks",
+                "2",
+            ],
+            checks[0].command,
+        )
 
     def test_repository_integration_requires_dsn(self) -> None:
         with mock.patch.dict(os.environ, {}, clear=True):
@@ -356,6 +441,7 @@ class PreflightCheckScriptTest(unittest.TestCase):
             include_backup_restore_drill=False,
             include_compose_override=False,
             include_retention_preview=False,
+            include_capacity_estimate=False,
         )
 
         with mock.patch.object(MODULE.os, "name", "nt"):
@@ -374,6 +460,7 @@ class PreflightCheckScriptTest(unittest.TestCase):
             include_backup_restore_drill=False,
             include_compose_override=False,
             include_retention_preview=False,
+            include_capacity_estimate=False,
         )
 
         checks = MODULE.selected_checks(args)
@@ -391,6 +478,7 @@ class PreflightCheckScriptTest(unittest.TestCase):
             include_backup_restore_drill=False,
             include_compose_override=False,
             include_retention_preview=False,
+            include_capacity_estimate=False,
         )
 
         checks = MODULE.selected_checks(args)
@@ -408,6 +496,7 @@ class PreflightCheckScriptTest(unittest.TestCase):
             include_backup_restore_drill=False,
             include_compose_override=True,
             include_retention_preview=False,
+            include_capacity_estimate=False,
         )
 
         checks = MODULE.selected_checks(args)

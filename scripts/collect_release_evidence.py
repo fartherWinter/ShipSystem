@@ -45,6 +45,8 @@ def main() -> int:
         include_db_integration=args.include_db_integration,
         include_backup_restore_drill=args.include_backup_restore_drill,
         include_runtime_observability_snapshot=args.include_runtime_observability_snapshot,
+        include_retention_preview=args.include_retention_preview,
+        include_capacity_estimate=args.include_capacity_estimate,
     )
     manifest: dict[str, object] = {
         "generatedAt": datetime.now(timezone.utc).isoformat(),
@@ -54,18 +56,26 @@ def main() -> int:
         "includeDbIntegration": args.include_db_integration,
         "includeBackupRestoreDrill": args.include_backup_restore_drill,
         "includeRuntimeObservabilitySnapshot": args.include_runtime_observability_snapshot,
+        "includeRetentionPreview": args.include_retention_preview,
+        "includeCapacityEstimate": args.include_capacity_estimate,
         "steps": [],
     }
 
+    failed = False
     for step in steps:
         result = run_step(step, output_dir)
         manifest["steps"].append(asdict(result))
         if result.exitCode != 0:
-            write_manifest(output_dir, manifest)
-            print(f"[FAIL] {step.name} failed; see {output_dir}")
-            return 1
+            failed = True
+            if not args.continue_on_failure:
+                write_manifest(output_dir, manifest)
+                print(f"[FAIL] {step.name} failed; see {output_dir}")
+                return 1
 
     write_manifest(output_dir, manifest)
+    if failed:
+        print(f"[FAIL] one or more evidence steps failed; see {output_dir}")
+        return 1
     print(f"Release evidence collected in {output_dir}")
     return 0
 
@@ -101,6 +111,21 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Also run scripts/run_runtime_observability_snapshot.py and archive its output. Requires a running stack.",
     )
+    parser.add_argument(
+        "--include-retention-preview",
+        action="store_true",
+        help="Also run scripts/retention_maintenance.py in preview mode and archive its output.",
+    )
+    parser.add_argument(
+        "--include-capacity-estimate",
+        action="store_true",
+        help="Also run scripts/run_capacity_smoke.py --estimate-only and archive its output.",
+    )
+    parser.add_argument(
+        "--continue-on-failure",
+        action="store_true",
+        help="Continue collecting later evidence steps even after one step fails. The command still exits non-zero.",
+    )
     return parser.parse_args()
 
 
@@ -111,6 +136,8 @@ def selected_steps(
     include_db_integration: bool,
     include_backup_restore_drill: bool,
     include_runtime_observability_snapshot: bool,
+    include_retention_preview: bool,
+    include_capacity_estimate: bool,
 ) -> list[EvidenceStep]:
     steps = [
         EvidenceStep(
@@ -167,6 +194,8 @@ def selected_steps(
                     include_db_integration=include_db_integration,
                     include_backup_restore_drill=True,
                     include_runtime_observability_snapshot=include_runtime_observability_snapshot,
+                    include_retention_preview=include_retention_preview,
+                    include_capacity_estimate=include_capacity_estimate,
                     step_name="backup-restore-drill",
                 ),
             )
@@ -183,7 +212,57 @@ def selected_steps(
                     include_db_integration=include_db_integration,
                     include_backup_restore_drill=include_backup_restore_drill,
                     include_runtime_observability_snapshot=True,
+                    include_retention_preview=include_retention_preview,
+                    include_capacity_estimate=include_capacity_estimate,
                     step_name="runtime-observability-snapshot",
+                ),
+            )
+        )
+    if include_retention_preview:
+        steps.append(
+            EvidenceStep(
+                "retention-preview",
+                [sys.executable, "scripts/retention_maintenance.py"],
+                ROOT,
+                evidence_filename(
+                    include_runtime=include_runtime,
+                    include_runtime_precheck=include_runtime_precheck,
+                    include_db_integration=include_db_integration,
+                    include_backup_restore_drill=include_backup_restore_drill,
+                    include_runtime_observability_snapshot=include_runtime_observability_snapshot,
+                    include_retention_preview=True,
+                    include_capacity_estimate=include_capacity_estimate,
+                    step_name="retention-preview",
+                ),
+            )
+        )
+    if include_capacity_estimate:
+        steps.append(
+            EvidenceStep(
+                "capacity-estimate",
+                [
+                    sys.executable,
+                    "scripts/run_capacity_smoke.py",
+                    "--estimate-only",
+                    "--track-counts",
+                    "5,20,100",
+                    "--ticks",
+                    "6",
+                    "--duration-seconds",
+                    "30",
+                    "--action-every-ticks",
+                    "2",
+                ],
+                ROOT,
+                evidence_filename(
+                    include_runtime=include_runtime,
+                    include_runtime_precheck=include_runtime_precheck,
+                    include_db_integration=include_db_integration,
+                    include_backup_restore_drill=include_backup_restore_drill,
+                    include_runtime_observability_snapshot=include_runtime_observability_snapshot,
+                    include_retention_preview=include_retention_preview,
+                    include_capacity_estimate=True,
+                    step_name="capacity-estimate",
                 ),
             )
         )
@@ -197,6 +276,8 @@ def evidence_filename(
     include_db_integration: bool,
     include_backup_restore_drill: bool,
     include_runtime_observability_snapshot: bool,
+    include_retention_preview: bool,
+    include_capacity_estimate: bool,
     step_name: str,
 ) -> str:
     index = 3
@@ -214,6 +295,14 @@ def evidence_filename(
         index += 1
     if step_name == "runtime-observability-snapshot" and include_runtime_observability_snapshot:
         return f"{index:02d}-runtime-observability-snapshot.txt"
+    if include_runtime_observability_snapshot:
+        index += 1
+    if step_name == "retention-preview" and include_retention_preview:
+        return f"{index:02d}-retention-preview.txt"
+    if include_retention_preview:
+        index += 1
+    if step_name == "capacity-estimate" and include_capacity_estimate:
+        return f"{index:02d}-capacity-estimate.txt"
     raise ValueError(f"unsupported evidence step name: {step_name}")
 
 
