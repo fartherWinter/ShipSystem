@@ -79,7 +79,7 @@
 | P1 | 缺少数据库备份保留策略和常态化恢复演练证据 | 当前已经具备临时 PostGIS 上的 backup/restore drill 脚本与一次真实通过证据，但还没有生产节奏下的周期化演练、备份保留策略和责任归档 | 将 backup/restore drill 纳入发布证据或周期演练，并补充生产级备份保留、恢复窗口和责任人机制 |
 | P1 | 缺少集中化日志、指标和告警平台 | 当前已经具备 requestId 透传、analytics delivery 状态接口和运行态 observability snapshot 脚本，但还没有集中化采集、聚合展示和主动告警 | 接入日志采集、指标暴露、错误率/延迟/WS 掉线/analytics delivery 告警，并把 snapshot 结果纳入发布或巡检证据 |
 | P1 | 业务并发和幂等测试仍偏少 | 高并发位置上报、告警确认、调度状态流转、雷达回放可能出现边界问题 | 增加 service/repository 层并发、事务、幂等和状态机测试 |
-| P1 | 前端缺少浏览器级 E2E | 静态路由和 build 能防结构回归，但不能证明页面交互完整 | 引入 Playwright 覆盖登录、导航、表格、地图、对战回放和无权限跳转 |
+| P1 | 前端浏览器级 E2E 覆盖仍不足 | 当前已补 Playwright 基座和登录 / RBAC 无权限跳转首批场景，但地图、表格编辑、对战回放和退出流程还没有浏览器级回归 | 继续扩展 Playwright 覆盖登录、角色菜单、表格交互、地图、对战回放和退出 |
 | P2 | 地图与 Ant Design 共享 chunk 仍是前端首屏体积主因 | 当前最大 JS chunk 已降到约 445 KiB，但 `vendor-antd`、`vendor-antd-rc`、`vendor-map` 仍是主要传输成本 | 后续继续按路由使用面拆重组件，引入浏览器级性能基线，并结合真实访问链路决定是否继续下调 bundle budget |
 | P2 | Docker Compose 仍偏本地开发 | 适合本地和预生产 smoke，不等于生产部署拓扑 | 生产环境单独维护 Helm/Kustomize/Compose prod override，并纳入审计 |
 | P1 | 部分接口错误语义仍不统一 | 多数 not-found 路径已统一到 404，但仍需继续复核剩余 handler/service 分支，避免底层错误字符串或 500 语义泄漏到外部契约 | 继续逐个收敛剩余 not-found 分支，并补对应回归测试；完成后再同步收紧 OpenAPI 与 smoke 断言 |
@@ -100,7 +100,7 @@
 - Frontend bundle splitting has been tightened without changing route behavior: the Vite manual chunk strategy now separates React, map, Ant Design core, `@rc-component`, and Ant Design icon dependencies. Current `npm run build` evidence shows the largest JS chunk at about 445.1 KiB, down from the earlier ~817.5 KiB single `vendor-antd` chunk, and the bundle gate is now enforced at 600 KiB per JS chunk.
 - Frontend route and bundle gate scripts now export reusable check functions and have `node:test` regression coverage wired into `npm run build` via `npm run test:static`, so route/bundle guard logic is no longer validated only indirectly by a successful build.
 - The gate scripts now have their own regression checks: `python -m unittest discover -s scripts_tests` currently passes with coverage over the custom OpenAPI parser, the runtime precheck Windows diagnostics, the compose baseline parser, the smoke gate helpers, and the frontend API / RBAC / WebSocket event / analytics callback static contract parsers, reducing the risk that release gates themselves drift silently.
-- Remaining gap: CI/CD enforcement is still missing, centralized metrics/alerting and backup/restore drills are still missing, some handler not-found branches still need follow-up review, schema-level uniqueness for snapshot time still needs an explicit migration decision, and browser E2E flows are still missing.
+- Remaining gap: CI/CD enforcement is still missing, centralized metrics/alerting and backup/restore drills are still missing, some handler not-found branches still need follow-up review, schema-level uniqueness for snapshot time still needs an explicit migration decision, and browser E2E coverage is still partial.
 
 ### 2026-06-26 progress note
 
@@ -113,6 +113,7 @@
 - Runtime observability evidence can now be archived explicitly: `python scripts/collect_release_evidence.py --include-runtime-observability-snapshot --output-dir .release-evidence/latest-observability` produced a manifest-backed artifact set for this workspace state.
 - The full evidence bundle in `.release-evidence/latest-full` now contains migrate status, preflight output, smoke output, and DB integration output, which closes the previous “no runtime evidence / no DB integration evidence” audit gap for this workspace state.
 - Handler error semantics have been tightened further: track queries, alarm ACK, dispatch status updates, battle timeline/snapshot/report/stop endpoints, radar report callbacks, and analytics proxy handlers now avoid leaking raw storage/internal errors while keeping stable 404-facing or upstream-facing messages.
+- Browser E2E now has a real Playwright base: `frontend/playwright.config.ts` plus mocked browser flows currently cover successful login-to-dashboard rendering and viewer-role redirect away from `/rbac`, giving the repo its first executable browser-level auth/RBAC regression checks via `cd frontend && npm run test:e2e`.
 
 ## 后续开发路线
 
@@ -204,6 +205,6 @@ python scripts/smoke_check.py
 
 - 没有 CI/CD 对阶段 gate 的强制执行证据。
 - 没有生产环境配置、secret、备份恢复、日志指标告警的落地证据。
-- 没有浏览器级 E2E 结果。
+- 浏览器级 E2E 已有首批结果，但覆盖面还不够完整。
 
 因此当前 Goal 仍应保持 active，后续继续按“发布证据闭环 -> 运维能力 -> 业务正确性 -> 前端 E2E/性能 -> 接口契约”推进。
