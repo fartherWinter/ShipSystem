@@ -26,6 +26,13 @@ class Check:
     capture_output: bool = False
 
 
+RUNTIME_SMOKE_CHECK = Check(
+    "runtime smoke",
+    [sys.executable, "scripts/smoke_check.py"],
+    ROOT,
+)
+
+
 def main() -> int:
     args = parse_args()
     checks = selected_checks(args)
@@ -43,10 +50,9 @@ def main() -> int:
     for name, elapsed in passed:
         print(f"- {name}: {elapsed:.1f}s")
     print(f"Total: {total_elapsed:.1f}s")
-    if args.include_runtime_smoke:
-        print("Runtime smoke was not run by preflight; runtime prerequisites were checked.")
-        print("Start the full stack and run scripts/smoke_check.py to capture runtime evidence.")
-    if args.include_db_integration:
+    if any(check.name == RUNTIME_SMOKE_CHECK.name for check in checks):
+        print("Runtime smoke checks were included.")
+    if any(check.name == "repository DB integration tests" for check in checks):
         print("Repository DB integration checks were included.")
     return 0
 
@@ -79,7 +85,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--include-runtime-smoke",
         action="store_true",
-        help="Run runtime prerequisite checks and print a reminder. The smoke script still requires a running stack and is not started here.",
+        help="Run runtime prerequisite checks followed by smoke_check.py. Requires a running stack.",
     )
     parser.add_argument(
         "--include-db-integration",
@@ -171,6 +177,19 @@ def selected_checks(args: argparse.Namespace) -> list[Check]:
     )
     include_compose_override = args.include_compose_override or (args.only is not None and "compose-override" in args.only)
     include_retention_preview = args.include_retention_preview or (args.only is not None and "retention-preview" in args.only)
+    extra_checks: list[Check] = []
+    if args.include_runtime_smoke:
+        extra_checks.extend([checks["runtime-precheck"], RUNTIME_SMOKE_CHECK])
+    if include_runtime_observability_snapshot:
+        extra_checks.append(checks["runtime-observability-snapshot"])
+    if include_db_integration:
+        extra_checks.append(checks["db-integration"])
+    if include_backup_restore_drill:
+        extra_checks.append(checks["backup-restore-drill"])
+    if include_compose_override:
+        extra_checks.append(checks["compose-override"])
+    if include_retention_preview:
+        extra_checks.append(checks["retention-preview"])
     if not args.only:
         selected = [
             checks["go"],
@@ -184,20 +203,16 @@ def selected_checks(args: argparse.Namespace) -> list[Check]:
             checks["rbac-matrix"],
             checks["frontend"],
         ]
-        if args.include_runtime_smoke:
-            selected.append(checks["runtime-precheck"])
-        if include_runtime_observability_snapshot:
-            selected.append(checks["runtime-observability-snapshot"])
-        if include_db_integration:
-            selected.append(checks["db-integration"])
-        if include_backup_restore_drill:
-            selected.append(checks["backup-restore-drill"])
-        if include_compose_override:
-            selected.append(checks["compose-override"])
-        if include_retention_preview:
-            selected.append(checks["retention-preview"])
-        return selected
-    return [checks[name] for name in args.only]
+    else:
+        selected = [checks[name] for name in args.only]
+
+    selected_names = {check.name for check in selected}
+    for check in extra_checks:
+        if check.name in selected_names:
+            continue
+        selected.append(check)
+        selected_names.add(check.name)
+    return selected
 
 
 def repository_integration_check() -> Check:

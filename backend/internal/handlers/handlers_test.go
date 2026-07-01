@@ -1284,6 +1284,48 @@ func TestStartBattleSimulationReturnsValidationMessage(t *testing.T) {
 	}
 }
 
+func TestMonitorWSReturnsUnauthorizedWhenAuthTokenIsMissing(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(&fakeAuthService{}, nil, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.GET("/ws/monitor", handler.MonitorWS)
+
+	req := httptest.NewRequest(http.MethodGet, "/ws/monitor", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["message"] != "missing auth token" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
+func TestMonitorWSReturnsUnauthorizedWhenAuthTokenIsInvalid(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(&fakeAuthService{
+		parseTokenFn: func(tokenText string) (*services.Claims, error) {
+			return nil, io.ErrUnexpectedEOF
+		},
+	}, nil, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.GET("/ws/monitor", handler.MonitorWS)
+
+	req := httptest.NewRequest(http.MethodGet, "/ws/monitor?token=bad-token", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["message"] != "invalid auth token" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
 func decodeJSONBody(t *testing.T, recorder *httptest.ResponseRecorder) map[string]interface{} {
 	t.Helper()
 	body, err := io.ReadAll(recorder.Body)

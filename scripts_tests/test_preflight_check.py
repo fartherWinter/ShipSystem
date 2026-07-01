@@ -84,7 +84,150 @@ class PreflightCheckScriptTest(unittest.TestCase):
         names = [check.name for check in checks]
 
         self.assertIn("runtime smoke precheck", names)
-        self.assertEqual("runtime smoke precheck", names[-1])
+        self.assertEqual(["runtime smoke precheck", "runtime smoke"], names[-2:])
+
+    def test_runtime_smoke_check_uses_smoke_script(self) -> None:
+        args = argparse.Namespace(
+            only=None,
+            include_runtime_smoke=True,
+            include_db_integration=False,
+            include_runtime_observability_snapshot=False,
+            include_backup_restore_drill=False,
+            include_compose_override=False,
+            include_retention_preview=False,
+        )
+
+        checks = MODULE.selected_checks(args)
+
+        self.assertEqual([sys.executable, "scripts/smoke_check.py"], checks[-1].command)
+
+    def test_runtime_smoke_check_name_is_stable(self) -> None:
+        args = argparse.Namespace(
+            only=None,
+            include_runtime_smoke=True,
+            include_db_integration=False,
+            include_runtime_observability_snapshot=False,
+            include_backup_restore_drill=False,
+            include_compose_override=False,
+            include_retention_preview=False,
+        )
+
+        checks = MODULE.selected_checks(args)
+
+        self.assertEqual("runtime smoke", checks[-1].name)
+
+    def test_only_go_with_runtime_smoke_appends_runtime_checks(self) -> None:
+        args = argparse.Namespace(
+            only=["go"],
+            include_runtime_smoke=True,
+            include_db_integration=False,
+            include_runtime_observability_snapshot=False,
+            include_backup_restore_drill=False,
+            include_compose_override=False,
+            include_retention_preview=False,
+        )
+
+        checks = MODULE.selected_checks(args)
+        names = [check.name for check in checks]
+
+        self.assertEqual(["go tests", "runtime smoke precheck", "runtime smoke"], names)
+
+    def test_only_go_with_runtime_observability_snapshot_appends_snapshot(self) -> None:
+        args = argparse.Namespace(
+            only=["go"],
+            include_runtime_smoke=False,
+            include_db_integration=False,
+            include_runtime_observability_snapshot=True,
+            include_backup_restore_drill=False,
+            include_compose_override=False,
+            include_retention_preview=False,
+        )
+
+        checks = MODULE.selected_checks(args)
+        names = [check.name for check in checks]
+
+        self.assertEqual(["go tests", "runtime observability snapshot"], names)
+
+    def test_only_go_with_repository_integration_appends_db_check(self) -> None:
+        args = argparse.Namespace(
+            only=["go"],
+            include_runtime_smoke=False,
+            include_db_integration=True,
+            include_runtime_observability_snapshot=False,
+            include_backup_restore_drill=False,
+            include_compose_override=False,
+            include_retention_preview=False,
+        )
+
+        dsn = "host=localhost user=shipsystem password=shipsystem dbname=shipsystem_test"
+        with mock.patch.dict(os.environ, {"SHIPSYSTEM_REPOSITORY_TEST_DSN": dsn}, clear=True):
+            checks = MODULE.selected_checks(args)
+
+        names = [check.name for check in checks]
+        self.assertEqual(["go tests", "repository DB integration tests"], names)
+
+    def test_only_go_with_backup_restore_drill_appends_drill(self) -> None:
+        args = argparse.Namespace(
+            only=["go"],
+            include_runtime_smoke=False,
+            include_db_integration=False,
+            include_runtime_observability_snapshot=False,
+            include_backup_restore_drill=True,
+            include_compose_override=False,
+            include_retention_preview=False,
+        )
+
+        checks = MODULE.selected_checks(args)
+        names = [check.name for check in checks]
+
+        self.assertEqual(["go tests", "backup restore drill"], names)
+
+    def test_only_go_with_compose_override_appends_override(self) -> None:
+        args = argparse.Namespace(
+            only=["go"],
+            include_runtime_smoke=False,
+            include_db_integration=False,
+            include_runtime_observability_snapshot=False,
+            include_backup_restore_drill=False,
+            include_compose_override=True,
+            include_retention_preview=False,
+        )
+
+        checks = MODULE.selected_checks(args)
+        names = [check.name for check in checks]
+
+        self.assertEqual(["go tests", "compose override"], names)
+
+    def test_only_go_with_retention_preview_appends_preview(self) -> None:
+        args = argparse.Namespace(
+            only=["go"],
+            include_runtime_smoke=False,
+            include_db_integration=False,
+            include_runtime_observability_snapshot=False,
+            include_backup_restore_drill=False,
+            include_compose_override=False,
+            include_retention_preview=True,
+        )
+
+        checks = MODULE.selected_checks(args)
+        names = [check.name for check in checks]
+
+        self.assertEqual(["go tests", "retention preview"], names)
+
+    def test_runtime_smoke_summary_is_printed_only_when_check_is_selected(self) -> None:
+        args = argparse.Namespace(
+            only=["go"],
+            include_runtime_smoke=False,
+            include_db_integration=False,
+            include_runtime_observability_snapshot=False,
+            include_backup_restore_drill=False,
+            include_compose_override=False,
+            include_retention_preview=False,
+        )
+
+        checks = MODULE.selected_checks(args)
+
+        self.assertFalse(any(check.name == "runtime smoke" for check in checks))
 
     def test_compose_override_is_opt_in_for_default_preflight(self) -> None:
         args = argparse.Namespace(
@@ -255,6 +398,22 @@ class PreflightCheckScriptTest(unittest.TestCase):
         self.assertEqual(1, len(checks))
         self.assertEqual("runtime observability snapshot", checks[0].name)
         self.assertEqual([sys.executable, "scripts/run_runtime_observability_snapshot.py"], checks[0].command)
+
+    def test_only_explicit_and_include_same_check_does_not_duplicate(self) -> None:
+        args = argparse.Namespace(
+            only=["compose-override"],
+            include_runtime_smoke=False,
+            include_db_integration=False,
+            include_runtime_observability_snapshot=False,
+            include_backup_restore_drill=False,
+            include_compose_override=True,
+            include_retention_preview=False,
+        )
+
+        checks = MODULE.selected_checks(args)
+        names = [check.name for check in checks]
+
+        self.assertEqual(["compose override"], names)
 
     def test_known_windows_node_realpath_eperm_is_detected(self) -> None:
         completed = MODULE.subprocess.CompletedProcess(
