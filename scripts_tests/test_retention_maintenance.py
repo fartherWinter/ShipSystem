@@ -101,6 +101,13 @@ class RetentionMaintenanceTest(unittest.TestCase):
 
         self.assertIn("retention query failed", str(ctx.exception))
 
+    def test_run_scalar_reports_missing_psql_binary(self) -> None:
+        with mock.patch.object(MODULE.subprocess, "run", side_effect=FileNotFoundError("psql")):
+            with self.assertRaises(SystemExit) as ctx:
+                MODULE.run_scalar("psql", "host=localhost", "SELECT 1;")
+
+        self.assertIn("retention query could not start command", str(ctx.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

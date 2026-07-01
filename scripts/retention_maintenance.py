@@ -273,14 +273,19 @@ def stopped_session_cap_step(table: str, order_column: str, max_rows: int, descr
 
 
 def run_scalar(psql: str, dsn: str, sql: str) -> str:
-    completed = subprocess.run(
-        [psql, dsn, "-X", "-q", "-t", "-A", "-v", "ON_ERROR_STOP=1", "-c", sql],
-        cwd=ROOT,
-        check=False,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-    )
+    command = [psql, dsn, "-X", "-q", "-t", "-A", "-v", "ON_ERROR_STOP=1", "-c", sql]
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+    except FileNotFoundError as exc:
+        missing = exc.filename or psql
+        raise SystemExit(f"[FAIL] retention query could not start command: {missing}") from exc
     if completed.returncode != 0:
         detail = completed.stderr.strip() or completed.stdout.strip() or "psql failed"
         raise SystemExit(f"[FAIL] retention query failed: {detail}")
