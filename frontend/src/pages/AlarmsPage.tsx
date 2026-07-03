@@ -1,6 +1,6 @@
 import { Alert, Button, Select, Space, Table, Tag, Typography, message } from 'antd';
 import { Check, RefreshCw } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
 import type { Alarm } from '../types';
 
@@ -18,7 +18,23 @@ function formatDateTime(value?: string | null) {
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
+    second: '2-digit',
   });
+}
+
+function compareAlarms(left: Alarm, right: Alarm) {
+  const leftTime = Date.parse(left.createdAt);
+  const rightTime = Date.parse(right.createdAt);
+  if (Number.isNaN(leftTime) && Number.isNaN(rightTime)) {
+    return right.id - left.id;
+  }
+  if (Number.isNaN(leftTime)) {
+    return 1;
+  }
+  if (Number.isNaN(rightTime)) {
+    return -1;
+  }
+  return rightTime - leftTime;
 }
 
 export default function AlarmsPage() {
@@ -30,8 +46,12 @@ export default function AlarmsPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [total, setTotal] = useState(0);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState('');
 
-  async function load(nextStatus = status, nextPage = page, nextPageSize = pageSize) {
+  const sortedItems = useMemo(() => [...items].sort(compareAlarms), [items]);
+
+  async function load(nextStatus = status, nextPage = page, nextPageSize = pageSize, options?: { silent?: boolean }) {
+    const silent = options?.silent ?? false;
     setLoading(true);
     setError('');
     try {
@@ -40,10 +60,13 @@ export default function AlarmsPage() {
       setTotal(data.total);
       setPage(nextPage);
       setPageSize(nextPageSize);
+      setLastUpdatedAt(new Date().toISOString());
     } catch (err) {
       const text = err instanceof Error ? err.message : '加载告警列表失败';
       setError(text);
-      message.error(text);
+      if (!silent) {
+        message.error(text);
+      }
     } finally {
       setLoading(false);
     }
@@ -52,6 +75,13 @@ export default function AlarmsPage() {
   useEffect(() => {
     void load('', 1, pageSize);
   }, []);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      void load(status, page, pageSize, { silent: true });
+    }, 10000);
+    return () => window.clearInterval(timer);
+  }, [page, pageSize, status]);
 
   async function ack(id: number) {
     setAckingId(id);
@@ -89,11 +119,14 @@ export default function AlarmsPage() {
         </Space>
       </div>
       {error && <Alert type="error" showIcon message="告警列表加载失败" description={error} action={<Button onClick={() => void load(status, page, pageSize)}>重试</Button>} />}
-      <Typography.Text type="secondary">当前显示 {items.length} / {total} 条告警</Typography.Text>
+      <Space direction="vertical" size={4}>
+        <Typography.Text type="secondary">当前显示 {sortedItems.length} / {total} 条告警</Typography.Text>
+        <Typography.Text type="secondary">最近刷新：{formatDateTime(lastUpdatedAt)}</Typography.Text>
+      </Space>
       <Table
         rowKey="id"
         loading={loading}
-        dataSource={items}
+        dataSource={sortedItems}
         pagination={{
           current: page,
           pageSize,
