@@ -507,6 +507,30 @@ func TestListShipsReturnsItemsOnSuccess(t *testing.T) {
 	}
 }
 
+func TestGetShipReturnsBadRequestForInvalidID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, &fakeAppService{
+		getShipFn: func(ctx context.Context, id uint) (models.Ship, error) {
+			t.Fatal("expected getShipFn not to be called")
+			return models.Ship{}, nil
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.GET("/ships/:id", handler.GetShip)
+
+	req := httptest.NewRequest(http.MethodGet, "/ships/0", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["message"] != "ship id must be a positive integer" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
 func TestGetShipReturnsNotFoundWhenShipDoesNotExist(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	handler := NewHandler(nil, &fakeAppService{
@@ -770,6 +794,31 @@ func TestListMenusReturnsItemsOnSuccess(t *testing.T) {
 	}
 }
 
+func TestCreateShipReturnsBadRequestForMissingRequiredFields(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, &fakeAppService{
+		createShipFn: func(ctx context.Context, ship *models.Ship) error {
+			t.Fatal("expected createShipFn not to be called")
+			return nil
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.POST("/ships", handler.CreateShip)
+
+	req := httptest.NewRequest(http.MethodPost, "/ships", bytes.NewBufferString(`{"name":"Voyager"}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["message"] != "ship name and MMSI are required" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
 func TestCreateShipReturnsValidationMessage(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	handler := NewHandler(nil, &fakeAppService{
@@ -1009,6 +1058,126 @@ func TestListBattleSnapshotsReturnsBadRequestForInvalidTickRange(t *testing.T) {
 	}
 }
 
+func TestListBattleSnapshotsReturnsBadRequestForInvalidFromTick(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, &fakeAppService{
+		listBattleSnapshotsFn: func(ctx context.Context, sessionID string, fromTick, toTick *int64) ([]services.BattleSnapshotView, error) {
+			t.Fatal("expected listBattleSnapshotsFn not to be called")
+			return nil, nil
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.GET("/battle/sessions/:sessionId/snapshots", handler.ListBattleSnapshots)
+
+	req := httptest.NewRequest(http.MethodGet, "/battle/sessions/battle-1/snapshots?from=bad", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["message"] != "from must be a valid tick" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
+func TestListBattleSnapshotsReturnsBadRequestForInvalidToTick(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, &fakeAppService{
+		listBattleSnapshotsFn: func(ctx context.Context, sessionID string, fromTick, toTick *int64) ([]services.BattleSnapshotView, error) {
+			t.Fatal("expected listBattleSnapshotsFn not to be called")
+			return nil, nil
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.GET("/battle/sessions/:sessionId/snapshots", handler.ListBattleSnapshots)
+
+	req := httptest.NewRequest(http.MethodGet, "/battle/sessions/battle-1/snapshots?from=1&to=bad", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["message"] != "to must be a valid tick" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
+func TestListTracksReturnsBadRequestForInvalidShipID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, &fakeAppService{
+		listTracksFn: func(ctx context.Context, shipID uint, start, end *time.Time) ([]models.ShipLocation, error) {
+			t.Fatal("expected listTracksFn not to be called")
+			return nil, nil
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.GET("/ships/:id/tracks", handler.ListTracks)
+
+	req := httptest.NewRequest(http.MethodGet, "/ships/0/tracks", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["message"] != "ship id must be a positive integer" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
+func TestListTracksReturnsBadRequestForInvalidStartTimestamp(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, &fakeAppService{
+		listTracksFn: func(ctx context.Context, shipID uint, start, end *time.Time) ([]models.ShipLocation, error) {
+			t.Fatal("expected listTracksFn not to be called")
+			return nil, nil
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.GET("/ships/:id/tracks", handler.ListTracks)
+
+	req := httptest.NewRequest(http.MethodGet, "/ships/42/tracks?start=bad", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["message"] != "start must be a valid RFC3339 timestamp" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
+func TestListTracksReturnsBadRequestForInvalidEndTimestamp(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, &fakeAppService{
+		listTracksFn: func(ctx context.Context, shipID uint, start, end *time.Time) ([]models.ShipLocation, error) {
+			t.Fatal("expected listTracksFn not to be called")
+			return nil, nil
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.GET("/ships/:id/tracks", handler.ListTracks)
+
+	req := httptest.NewRequest(http.MethodGet, "/ships/42/tracks?start=2026-07-03T09:00:00Z&end=bad", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["message"] != "end must be a valid RFC3339 timestamp" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
 func TestListTracksReturnsNotFoundWhenShipDoesNotExist(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	handler := NewHandler(nil, &fakeAppService{
@@ -1080,6 +1249,56 @@ func TestListTracksReturnsTrackItemsOnSuccess(t *testing.T) {
 	items, ok := body["items"].([]interface{})
 	if !ok || len(items) != 1 {
 		t.Fatalf("unexpected items: %#v", body["items"])
+	}
+}
+
+func TestUpdateShipReturnsBadRequestForInvalidShipID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, &fakeAppService{
+		updateShipFn: func(ctx context.Context, id uint, patch models.Ship) (models.Ship, error) {
+			t.Fatal("expected updateShipFn not to be called")
+			return models.Ship{}, nil
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.PUT("/ships/:id", handler.UpdateShip)
+
+	req := httptest.NewRequest(http.MethodPut, "/ships/0", bytes.NewBufferString(`{"name":"Voyager","mmsi":"123456789"}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["message"] != "ship id must be a positive integer" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
+func TestUpdateShipReturnsBadRequestForMissingRequiredFields(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, &fakeAppService{
+		updateShipFn: func(ctx context.Context, id uint, patch models.Ship) (models.Ship, error) {
+			t.Fatal("expected updateShipFn not to be called")
+			return models.Ship{}, nil
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.PUT("/ships/:id", handler.UpdateShip)
+
+	req := httptest.NewRequest(http.MethodPut, "/ships/42", bytes.NewBufferString(`{"name":"Voyager"}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["message"] != "ship name and MMSI are required" {
+		t.Fatalf("unexpected body: %#v", body)
 	}
 }
 
@@ -1182,6 +1401,30 @@ func TestUpdateShipReturnsUpdatedShipOnSuccess(t *testing.T) {
 	}
 }
 
+func TestDeleteShipReturnsBadRequestForInvalidShipID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, &fakeAppService{
+		deleteShipFn: func(ctx context.Context, id uint) error {
+			t.Fatal("expected deleteShipFn not to be called")
+			return nil
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.DELETE("/ships/:id", handler.DeleteShip)
+
+	req := httptest.NewRequest(http.MethodDelete, "/ships/0", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["message"] != "ship id must be a positive integer" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
 func TestDeleteShipReturnsNotFoundWhenShipDoesNotExist(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	handler := NewHandler(nil, &fakeAppService{
@@ -1252,6 +1495,81 @@ func TestDeleteShipReturnsNoContentOnSuccess(t *testing.T) {
 	}
 	if !deleted {
 		t.Fatal("expected deleteShipFn to be called")
+	}
+}
+
+func TestReportLocationReturnsBadRequestForInvalidShipID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, &fakeAppService{
+		reportLocationFn: func(ctx context.Context, loc *models.ShipLocation) (*models.Alarm, error) {
+			t.Fatal("expected reportLocationFn not to be called")
+			return nil, nil
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.POST("/ships/:id/locations", handler.ReportLocation)
+
+	req := httptest.NewRequest(http.MethodPost, "/ships/0/locations", bytes.NewBufferString(`{"longitude":120.1,"latitude":30.2}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["message"] != "ship id must be a positive integer" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
+func TestReportLocationReturnsBadRequestForInvalidJSON(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, &fakeAppService{
+		reportLocationFn: func(ctx context.Context, loc *models.ShipLocation) (*models.Alarm, error) {
+			t.Fatal("expected reportLocationFn not to be called")
+			return nil, nil
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.POST("/ships/:id/locations", handler.ReportLocation)
+
+	req := httptest.NewRequest(http.MethodPost, "/ships/42/locations", bytes.NewBufferString(`{"longitude":`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["message"] != "location report request is invalid" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
+func TestReportLocationReturnsBadRequestForInvalidFields(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, &fakeAppService{
+		reportLocationFn: func(ctx context.Context, loc *models.ShipLocation) (*models.Alarm, error) {
+			t.Fatal("expected reportLocationFn not to be called")
+			return nil, nil
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.POST("/ships/:id/locations", handler.ReportLocation)
+
+	req := httptest.NewRequest(http.MethodPost, "/ships/42/locations", bytes.NewBufferString(`{"longitude":190.1,"latitude":30.2,"speedKnots":12.5,"course":90}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["message"] != "location report fields are invalid" {
+		t.Fatalf("unexpected body: %#v", body)
 	}
 }
 
@@ -1336,6 +1654,30 @@ func TestReportLocationReturnsCreatedLocationAndAlarmOnSuccess(t *testing.T) {
 	alarm, ok := body["alarm"].(map[string]interface{})
 	if !ok || alarm["id"] != float64(9) {
 		t.Fatalf("unexpected alarm payload: %#v", body["alarm"])
+	}
+}
+
+func TestAckAlarmReturnsBadRequestForInvalidAlarmID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, &fakeAppService{
+		ackAlarmFn: func(ctx context.Context, id, userID uint) (models.Alarm, error) {
+			t.Fatal("expected ackAlarmFn not to be called")
+			return models.Alarm{}, nil
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.PUT("/alarms/:id/ack", handler.AckAlarm)
+
+	req := httptest.NewRequest(http.MethodPut, "/alarms/0/ack", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["message"] != "alarm id must be a positive integer" {
+		t.Fatalf("unexpected body: %#v", body)
 	}
 }
 
@@ -1487,6 +1829,56 @@ func TestListAlarmsReturnsItemsOnSuccess(t *testing.T) {
 	}
 }
 
+func TestUpdateDispatchStatusReturnsBadRequestForInvalidEventID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, &fakeAppService{
+		updateDispatchStatusFn: func(ctx context.Context, id uint, toStatus, remark string, operatorID *uint) (models.DispatchEvent, error) {
+			t.Fatal("expected updateDispatchStatusFn not to be called")
+			return models.DispatchEvent{}, nil
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.PUT("/dispatch-events/:id/status", handler.UpdateDispatchStatus)
+
+	req := httptest.NewRequest(http.MethodPut, "/dispatch-events/0/status", bytes.NewBufferString(`{"status":"PROCESSING"}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["message"] != "dispatch event id must be a positive integer" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
+func TestUpdateDispatchStatusReturnsBadRequestForInvalidPayload(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, &fakeAppService{
+		updateDispatchStatusFn: func(ctx context.Context, id uint, toStatus, remark string, operatorID *uint) (models.DispatchEvent, error) {
+			t.Fatal("expected updateDispatchStatusFn not to be called")
+			return models.DispatchEvent{}, nil
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.PUT("/dispatch-events/:id/status", handler.UpdateDispatchStatus)
+
+	req := httptest.NewRequest(http.MethodPut, "/dispatch-events/9/status", bytes.NewBufferString(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["message"] != "dispatch status request is invalid" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
 func TestUpdateDispatchStatusReturnsNotFoundWhenEventDoesNotExist(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	handler := NewHandler(nil, &fakeAppService{
@@ -1580,6 +1972,31 @@ func TestListDispatchEventsReturnsItemsOnSuccess(t *testing.T) {
 	body := decodeJSONBody(t, recorder)
 	items, ok := body["items"].([]interface{})
 	if !ok || len(items) != 1 || body["total"] != float64(1) {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
+func TestCreateDispatchEventReturnsBadRequestForMissingTitle(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, &fakeAppService{
+		createDispatchEventFn: func(ctx context.Context, event *models.DispatchEvent) error {
+			t.Fatal("expected createDispatchEventFn not to be called")
+			return nil
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.POST("/dispatch-events", handler.CreateDispatchEvent)
+
+	req := httptest.NewRequest(http.MethodPost, "/dispatch-events", bytes.NewBufferString(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["message"] != "dispatch event title is required" {
 		t.Fatalf("unexpected body: %#v", body)
 	}
 }
@@ -1745,6 +2162,31 @@ func TestGetBattleTimelineReturnsItemsOnSuccess(t *testing.T) {
 	body := decodeJSONBody(t, recorder)
 	items, ok := body["items"].([]interface{})
 	if !ok || len(items) != 1 {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
+func TestCreateBattleSessionReturnsBadRequestForInvalidJSON(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, &fakeAppService{
+		createBattleSessionFn: func(ctx context.Context, scenarioCode string) (models.BattleSession, services.BattleStateSnapshot, error) {
+			t.Fatal("expected createBattleSessionFn not to be called")
+			return models.BattleSession{}, services.BattleStateSnapshot{}, nil
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.POST("/battle/sessions", handler.CreateBattleSession)
+
+	req := httptest.NewRequest(http.MethodPost, "/battle/sessions", bytes.NewBufferString(`{"scenarioCode":`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["message"] != "battle session request is invalid" {
 		t.Fatalf("unexpected body: %#v", body)
 	}
 }
@@ -2127,6 +2569,31 @@ func TestStopBattleSessionReturnsStateOnSuccess(t *testing.T) {
 	}
 	body := decodeJSONBody(t, recorder)
 	if body["sessionId"] != "session-1" || body["status"] != "stopped" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
+func TestReceiveRadarReportReturnsBadRequestForInvalidJSON(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, &fakeAppService{
+		receiveRadarReportFn: func(ctx context.Context, report services.RadarReportPayload) (services.BattleStateSnapshot, error) {
+			t.Fatal("expected receiveRadarReportFn not to be called")
+			return services.BattleStateSnapshot{}, nil
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.POST("/radar/reports", handler.ReceiveRadarReport)
+
+	req := httptest.NewRequest(http.MethodPost, "/radar/reports", bytes.NewBufferString(`{"sessionId":`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["message"] != "radar report request is invalid" {
 		t.Fatalf("unexpected body: %#v", body)
 	}
 }
