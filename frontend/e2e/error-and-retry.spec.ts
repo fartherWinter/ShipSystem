@@ -1,3 +1,4 @@
+import type { Page } from '@playwright/test';
 import { expect, test } from '@playwright/test';
 import { installApiMocks, preloadSavedUser } from './fixtures';
 
@@ -6,23 +7,7 @@ test.describe('error and retry recovery', () => {
     await preloadSavedUser(page, 'viewer');
     await installApiMocks(page, 'viewer');
 
-    let shipFailures = 0;
-    await page.route(/\/api\/v1\/ships\?keyword=.*$/, async (route) => {
-      if (route.request().method() !== 'GET') {
-        await route.fallback();
-        return;
-      }
-      if (shipFailures === 0) {
-        shipFailures += 1;
-        await route.fulfill({
-          status: 500,
-          contentType: 'application/json; charset=utf-8',
-          body: JSON.stringify({ message: 'dashboard ship summary failed once' }),
-        });
-        return;
-      }
-      await route.fallback();
-    });
+    await failOnceAndFallback(page, /\/api\/v1\/ships\?keyword=.*$/, 'dashboard ship summary failed once');
 
     await page.goto('/dashboard');
 
@@ -42,23 +27,7 @@ test.describe('error and retry recovery', () => {
     await preloadSavedUser(page, 'dispatcher');
     await installApiMocks(page, 'dispatcher');
 
-    let dispatchFailures = 0;
-    await page.route(/\/api\/v1\/dispatch-events\?status=.*$/, async (route) => {
-      if (route.request().method() !== 'GET') {
-        await route.fallback();
-        return;
-      }
-      if (dispatchFailures === 0) {
-        dispatchFailures += 1;
-        await route.fulfill({
-          status: 500,
-          contentType: 'application/json; charset=utf-8',
-          body: JSON.stringify({ message: 'dispatch list failed once' }),
-        });
-        return;
-      }
-      await route.fallback();
-    });
+    await failOnceAndFallback(page, /\/api\/v1\/dispatch-events\?status=.*$/, 'dispatch list failed once');
 
     await page.goto('/dispatch');
 
@@ -71,4 +40,90 @@ test.describe('error and retry recovery', () => {
     await expect(alert).toHaveCount(0);
     await expect(page.locator('tbody tr', { hasText: 'Harbor Patrol Follow-up' })).toBeVisible();
   });
+
+  test('ships page recovers after the first list fetch fails', async ({ page }) => {
+    await preloadSavedUser(page, 'admin');
+    await installApiMocks(page, 'admin');
+
+    await failOnceAndFallback(page, /\/api\/v1\/ships\?keyword=.*$/, 'ships list failed once');
+
+    await page.goto('/ships');
+
+    const alert = page.locator('.ant-alert');
+    await expect(alert).toBeVisible();
+    await expect(alert).toContainText('ships list failed once');
+
+    await alert.locator('.ant-btn').click();
+
+    await expect(alert).toHaveCount(0);
+    await expect(page.locator('tbody tr', { hasText: '123456789' })).toBeVisible();
+  });
+
+  test('tracks query recovers after the first fetch fails', async ({ page }) => {
+    await preloadSavedUser(page, 'viewer');
+    await installApiMocks(page, 'viewer');
+
+    await failOnceAndFallback(page, /\/api\/v1\/ships\/101\/tracks$/, 'tracks query failed once');
+
+    await page.goto('/tracks');
+    await expect(page.locator('.track-map .monitor-map')).toBeVisible();
+
+    await page.locator('.page-toolbar .ant-btn-primary').click();
+
+    const alert = page.locator('.ant-alert');
+    await expect(alert).toBeVisible();
+    await expect(alert).toContainText('tracks query failed once');
+
+    await alert.locator('.ant-btn').click();
+
+    await expect(alert).toHaveCount(0);
+    await expect(page.locator('tbody tr')).toHaveCount(2);
+  });
+
+  test('monitor simulator start recovers after the first request fails', async ({ page }) => {
+    await preloadSavedUser(page, 'viewer');
+    await installApiMocks(page, 'viewer');
+
+    await failOnceAndFallback(
+      page,
+      /\/api\/v1\/analytics\/simulate\/start$/,
+      'monitor simulator start failed once',
+      'POST',
+    );
+
+    await page.goto('/monitor');
+    await expect(page.getByText('connected')).toBeVisible();
+
+    const startButton = page.locator('.side-panel .ant-btn-primary');
+    await startButton.click();
+
+    const alert = page.locator('.side-panel .ant-alert');
+    await expect(alert).toBeVisible();
+    await expect(alert).toContainText('monitor simulator start failed once');
+
+    await alert.locator('.ant-btn').click();
+
+    await expect(alert).toHaveCount(0);
+    await expect(startButton).not.toHaveClass(/ant-btn-loading/);
+  });
 });
+
+async function failOnceAndFallback(page: Page, pattern: RegExp, message: string, method = 'GET'): Promise<void> {
+  let failed = false;
+  await page.route(pattern, async (route) => {
+    if (route.request().method() !== method) {
+      await route.fallback();
+      return;
+    }
+    if (!failed) {
+      failed = true;
+      await route.fulfill({
+        status: 500,
+        contentType: 'application/json; charset=utf-8',
+        body: JSON.stringify({ message }),
+      });
+      return;
+    }
+    await route.fallback();
+  });
+}
