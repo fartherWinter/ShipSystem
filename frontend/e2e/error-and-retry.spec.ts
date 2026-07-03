@@ -106,6 +106,48 @@ test.describe('error and retry recovery', () => {
     await expect(alert).toHaveCount(0);
     await expect(startButton).not.toHaveClass(/ant-btn-loading/);
   });
+
+  test('battle live tab recovers after the first scenario fetch fails', async ({ page }) => {
+    await preloadSavedUser(page, 'viewer');
+    await installApiMocks(page, 'viewer');
+
+    await failOnceAndFallback(page, /\/api\/v1\/battle\/scenarios$/, 'battle scenarios failed once');
+
+    await page.goto('/battle');
+
+    const alert = page.locator('.battle-side-panel .ant-alert').first();
+    await expect(alert).toBeVisible();
+    await expect(alert).toContainText('battle scenarios failed once');
+
+    await alert.locator('.ant-btn').click();
+
+    await expect(alert).toHaveCount(0);
+    await expect(page.getByText('Mock replay session for browser regression coverage.')).toBeVisible();
+  });
+
+  test('battle replay tab recovers after the first detail fetch fails', async ({ page }) => {
+    await preloadSavedUser(page, 'viewer');
+    await installApiMocks(page, 'viewer');
+
+    await failOnceAndFallback(
+      page,
+      /\/api\/v1\/battle\/sessions\/session-alpha\/timeline$/,
+      'battle replay timeline failed once',
+    );
+
+    await page.goto('/battle');
+    await page.locator('.ant-tabs-tab').nth(1).click();
+
+    const alert = page.locator('.battle-side-panel .ant-alert').last();
+    await expect(alert).toBeVisible();
+    await expect(alert).toContainText('battle replay timeline failed once');
+
+    await alert.locator('.ant-btn').click();
+
+    await expect(alert).toHaveCount(0);
+    await expect(page.getByText('Blue radar contact established').first()).toBeVisible();
+    await expect(page.getByRole('slider')).toHaveAttribute('aria-valuemax', '2');
+  });
 });
 
 async function failOnceAndFallback(page: Page, pattern: RegExp, message: string, method = 'GET'): Promise<void> {
