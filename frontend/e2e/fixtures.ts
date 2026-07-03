@@ -36,6 +36,7 @@ export async function installApiMocks(page: Page, roleCode: RoleCode = 'viewer')
     },
   };
   let nextShipID = 102;
+  let nextDispatchEventID = 202;
   const ships = [
     {
       id: 101,
@@ -50,6 +51,141 @@ export async function installApiMocks(page: Page, roleCode: RoleCode = 'viewer')
       updatedAt: '2026-07-01T00:00:00Z',
     },
   ];
+  const dispatchEvents = [
+    {
+      id: 201,
+      title: 'Harbor Patrol Follow-up',
+      description: 'Confirm intercept route and handoff window.',
+      status: 'NEW',
+      priority: 'normal',
+      shipId: 101,
+      createdAt: '2026-07-02T01:00:00Z',
+      updatedAt: '2026-07-02T01:00:00Z',
+    },
+  ];
+  const battleScenario = {
+    code: 'open-water-duel',
+    name: 'Open Water Duel',
+    description: 'Mock replay session for browser regression coverage.',
+    originLongitude: 121.49,
+    originLatitude: 31.23,
+    blueUnits: 1,
+    redUnits: 1,
+    radarRangeKm: 80,
+    weaponRangeKm: 45,
+  };
+  const battleSessions = [
+    {
+      id: 301,
+      sessionId: 'session-alpha',
+      name: 'Replay Session Alpha',
+      scenarioCode: battleScenario.code,
+      status: 'blue_victory',
+      startedAt: '2026-07-02T09:00:00Z',
+      stoppedAt: '2026-07-02T09:03:00Z',
+      lastScanAt: '2026-07-02T09:03:00Z',
+      createdAt: '2026-07-02T09:00:00Z',
+      updatedAt: '2026-07-02T09:03:00Z',
+    },
+  ];
+  const battleTimelineBySession = {
+    'session-alpha': [
+      {
+        tick: 0,
+        snapshotTime: '2026-07-02T09:00:00Z',
+        eventCount: 1,
+        events: [
+          {
+            type: 'RADAR_CONTACT',
+            severity: 'INFO',
+            message: 'Blue radar contact established',
+            sourceUnitId: 'blue-01',
+            targetUnitId: 'red-01',
+          },
+        ],
+      },
+      {
+        tick: 1,
+        snapshotTime: '2026-07-02T09:01:00Z',
+        eventCount: 1,
+        events: [
+          {
+            type: 'WEAPON_RELEASE',
+            severity: 'WARN',
+            message: 'Blue escort launched missile volley',
+            sourceUnitId: 'blue-01',
+            targetUnitId: 'red-01',
+          },
+        ],
+      },
+      {
+        tick: 2,
+        snapshotTime: '2026-07-02T09:02:00Z',
+        eventCount: 1,
+        events: [
+          {
+            type: 'TARGET_DESTROYED',
+            severity: 'CRITICAL',
+            message: 'Red hull breach confirmed',
+            sourceUnitId: 'blue-01',
+            targetUnitId: 'red-01',
+          },
+        ],
+      },
+    ],
+  };
+  const battleSnapshotsBySession = {
+    'session-alpha': [
+      createBattleSnapshot(0, '2026-07-02T09:00:00Z'),
+      createBattleSnapshot(1, '2026-07-02T09:01:00Z'),
+      createBattleSnapshot(2, '2026-07-02T09:02:00Z'),
+    ],
+  };
+  const battleReportsBySession = {
+    'session-alpha': {
+      session: battleSessions[0],
+      winner: 'blue',
+      firedCount: 2,
+      hitCount: 1,
+      destroyedCount: 1,
+      damageRanking: [
+        {
+          unitId: 'red-01',
+          name: 'Red Frigate',
+          side: 'red',
+          maxHp: 100,
+          hp: 0,
+          damageTaken: 100,
+          status: 'destroyed',
+        },
+        {
+          unitId: 'blue-01',
+          name: 'Blue Escort',
+          side: 'blue',
+          maxHp: 100,
+          hp: 92,
+          damageTaken: 8,
+          status: 'active',
+        },
+      ],
+      keyEvents: [
+        {
+          id: 1,
+          sessionId: 'session-alpha',
+          eventId: 'event-2',
+          type: 'TARGET_DESTROYED',
+          severity: 'CRITICAL',
+          message: 'Red hull breach confirmed',
+          sourceUnitId: 'blue-01',
+          targetUnitId: 'red-01',
+          longitude: 121.53,
+          latitude: 31.235,
+          occurredAt: '2026-07-02T09:02:00Z',
+          createdAt: '2026-07-02T09:02:00Z',
+        },
+      ],
+    },
+  };
 
   await page.route('**/api/v1/**', async (route) => {
     const url = new URL(route.request().url());
@@ -137,7 +273,42 @@ export async function installApiMocks(page: Page, roleCode: RoleCode = 'viewer')
     }
 
     if (path === '/api/v1/dispatch-events' && method === 'GET') {
-      await json(route, 200, { items: [], total: 0 });
+      const status = url.searchParams.get('status');
+      const items = status ? dispatchEvents.filter((item) => item.status === status) : dispatchEvents;
+      await json(route, 200, { items, total: items.length });
+      return;
+    }
+
+    if (path === '/api/v1/dispatch-events' && method === 'POST') {
+      const payload = route.request().postDataJSON() as Record<string, unknown>;
+      const created = {
+        id: nextDispatchEventID++,
+        title: String(payload.title ?? ''),
+        description: String(payload.description ?? ''),
+        status: String(payload.status ?? 'NEW'),
+        priority: String(payload.priority ?? 'normal'),
+        shipId: payload.shipId ? Number(payload.shipId) : null,
+        createdAt: '2026-07-03T00:00:00Z',
+        updatedAt: '2026-07-03T00:00:00Z',
+      };
+      dispatchEvents.unshift(created);
+      await json(route, 201, created);
+      return;
+    }
+
+    if (/^\/api\/v1\/dispatch-events\/\d+\/status$/.test(path) && method === 'PUT') {
+      const dispatchID = Number(path.split('/')[4]);
+      const payload = route.request().postDataJSON() as Record<string, unknown>;
+      const target = dispatchEvents.find((item) => item.id === dispatchID);
+      if (!target) {
+        await json(route, 404, { message: 'dispatch event does not exist' });
+        return;
+      }
+      Object.assign(target, {
+        status: String(payload.status ?? target.status),
+        updatedAt: '2026-07-03T00:10:00Z',
+      });
+      await json(route, 200, target);
       return;
     }
 
@@ -162,12 +333,45 @@ export async function installApiMocks(page: Page, roleCode: RoleCode = 'viewer')
     }
 
     if (path === '/api/v1/battle/scenarios' && method === 'GET') {
-      await json(route, 200, { items: [] });
+      await json(route, 200, { items: [battleScenario] });
       return;
     }
 
     if (path === '/api/v1/battle/sessions' && method === 'GET') {
-      await json(route, 200, { items: [], total: 0 });
+      await json(route, 200, { items: battleSessions, total: battleSessions.length });
+      return;
+    }
+
+    if (/^\/api\/v1\/battle\/sessions\/[^/]+\/timeline$/.test(path) && method === 'GET') {
+      const sessionId = decodeURIComponent(path.split('/')[5]);
+      const items = battleTimelineBySession[sessionId as keyof typeof battleTimelineBySession];
+      if (!items) {
+        await json(route, 404, { message: 'battle timeline does not exist' });
+        return;
+      }
+      await json(route, 200, { items });
+      return;
+    }
+
+    if (/^\/api\/v1\/battle\/sessions\/[^/]+\/snapshots$/.test(path) && method === 'GET') {
+      const sessionId = decodeURIComponent(path.split('/')[5]);
+      const items = battleSnapshotsBySession[sessionId as keyof typeof battleSnapshotsBySession];
+      if (!items) {
+        await json(route, 404, { message: 'battle snapshots do not exist' });
+        return;
+      }
+      await json(route, 200, { items });
+      return;
+    }
+
+    if (/^\/api\/v1\/battle\/sessions\/[^/]+\/report$/.test(path) && method === 'GET') {
+      const sessionId = decodeURIComponent(path.split('/')[5]);
+      const item = battleReportsBySession[sessionId as keyof typeof battleReportsBySession];
+      if (!item) {
+        await json(route, 404, { message: 'battle report does not exist' });
+        return;
+      }
+      await json(route, 200, item);
       return;
     }
 
@@ -175,6 +379,143 @@ export async function installApiMocks(page: Page, roleCode: RoleCode = 'viewer')
   });
 
   await installMockWebSocket(page);
+}
+
+function createBattleSnapshot(tick: number, snapshotTime: string) {
+  const redDestroyed = tick >= 2;
+  const redLongitude = 121.55 - tick * 0.01;
+  const redLatitude = 31.24 - tick * 0.002;
+  return {
+    id: tick + 1,
+    sessionId: 'session-alpha',
+    tick,
+    snapshotTime,
+    units: [
+      {
+        sessionId: 'session-alpha',
+        unitId: 'blue-01',
+        shipId: 1,
+        name: 'Blue Escort',
+        side: 'blue',
+        hp: 92,
+        maxHp: 100,
+        radarRangeKm: 80,
+        weaponRangeKm: 45,
+        cooldownSeconds: 8,
+        longitude: 121.49 + tick * 0.01,
+        latitude: 31.23 + tick * 0.002,
+        course: 45,
+        speedKnots: 24,
+        status: 'active',
+        createdAt: '2026-07-02T09:00:00Z',
+        updatedAt: snapshotTime,
+      },
+      {
+        sessionId: 'session-alpha',
+        unitId: 'red-01',
+        shipId: 2,
+        name: 'Red Frigate',
+        side: 'red',
+        hp: redDestroyed ? 0 : 80 - tick * 10,
+        maxHp: 100,
+        radarRangeKm: 75,
+        weaponRangeKm: 42,
+        cooldownSeconds: 10,
+        longitude: redLongitude,
+        latitude: redLatitude,
+        course: 225,
+        speedKnots: 20,
+        status: redDestroyed ? 'destroyed' : 'active',
+        createdAt: '2026-07-02T09:00:00Z',
+        updatedAt: snapshotTime,
+      },
+    ],
+    projectiles:
+      tick === 0
+        ? []
+        : [
+            {
+              sessionId: 'session-alpha',
+              projectileId: `proj-${tick}`,
+              sourceUnitId: 'blue-01',
+              targetUnitId: 'red-01',
+              side: 'blue',
+              longitude: 121.5 + tick * 0.01,
+              latitude: 31.232 + tick * 0.001,
+              speedKmH: 900,
+              status: redDestroyed ? 'hit' : 'flying',
+              createdAt: '2026-07-02T09:01:00Z',
+              updatedAt: snapshotTime,
+            },
+          ],
+    radarTargets: [
+      {
+        sessionId: 'session-alpha',
+        radarId: 'blue-radar-01',
+        targetId: 'red-01',
+        side: 'red',
+        longitude: redLongitude,
+        latitude: redLatitude,
+        course: 225,
+        speedKnots: 20,
+        confidence: 0.97,
+        detected: true,
+        scanTime: snapshotTime,
+        createdAt: snapshotTime,
+      },
+    ],
+    events:
+      tick === 0
+        ? [
+            {
+              id: 1,
+              sessionId: 'session-alpha',
+              eventId: 'event-0',
+              type: 'RADAR_CONTACT',
+              severity: 'INFO',
+              message: 'Blue radar contact established',
+              sourceUnitId: 'blue-01',
+              targetUnitId: 'red-01',
+              longitude: redLongitude,
+              latitude: redLatitude,
+              occurredAt: snapshotTime,
+              createdAt: snapshotTime,
+            },
+          ]
+        : tick === 1
+          ? [
+              {
+                id: 2,
+                sessionId: 'session-alpha',
+                eventId: 'event-1',
+                type: 'WEAPON_RELEASE',
+                severity: 'WARN',
+                message: 'Blue escort launched missile volley',
+                sourceUnitId: 'blue-01',
+                targetUnitId: 'red-01',
+                longitude: 121.51,
+                latitude: 31.233,
+                occurredAt: snapshotTime,
+                createdAt: snapshotTime,
+              },
+            ]
+          : [
+              {
+                id: 3,
+                sessionId: 'session-alpha',
+                eventId: 'event-2',
+                type: 'TARGET_DESTROYED',
+                severity: 'CRITICAL',
+                message: 'Red hull breach confirmed',
+                sourceUnitId: 'blue-01',
+                targetUnitId: 'red-01',
+                longitude: redLongitude,
+                latitude: redLatitude,
+                occurredAt: snapshotTime,
+                createdAt: snapshotTime,
+              },
+            ],
+  };
 }
 
 export async function preloadSavedUser(page: Page, roleCode: RoleCode = 'viewer'): Promise<void> {
