@@ -272,7 +272,7 @@ function BattleReplayPanel() {
     setLoading(true);
     setSessionsError('');
     try {
-      const res = await api.battleSessions();
+      const res = await api.battleSessions({ page: 1, size: 100 });
       setSessions(res.items);
       if (!selectedSessionId && res.items[0]) {
         await loadSession(res.items[0].sessionId);

@@ -1,4 +1,4 @@
-import { Alert, Button, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, Tag, message } from 'antd';
+import { Alert, Button, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, Tag, Typography, message } from 'antd';
 import { Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { api } from '../api/client';
@@ -13,15 +13,21 @@ export default function ShipsPage() {
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [editing, setEditing] = useState<Ship | null>(null);
   const [open, setOpen] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [total, setTotal] = useState(0);
   const [form] = Form.useForm();
 
-  async function load(nextKeyword = keyword) {
+  async function load(nextKeyword = keyword, nextPage = page, nextPageSize = pageSize) {
     const normalizedKeyword = nextKeyword.trim();
     setLoading(true);
     setError('');
     try {
-      const data = await api.ships(normalizedKeyword);
+      const data = await api.ships(normalizedKeyword, { page: nextPage, size: nextPageSize });
       setItems(data.items);
+      setTotal(data.total);
+      setPage(nextPage);
+      setPageSize(nextPageSize);
     } catch (err) {
       const text = err instanceof Error ? err.message : '加载船舶列表失败';
       setError(text);
@@ -32,7 +38,7 @@ export default function ShipsPage() {
   }
 
   useEffect(() => {
-    load();
+    void load('', 1, pageSize);
   }, []);
 
   function showModal(ship?: Ship) {
@@ -60,7 +66,7 @@ export default function ShipsPage() {
         message.success('船舶已创建');
       }
       closeModal();
-      await load();
+      await load(keyword, page, pageSize);
     } catch (err) {
       message.error(err instanceof Error ? err.message : '保存船舶失败');
     } finally {
@@ -73,7 +79,8 @@ export default function ShipsPage() {
     try {
       await api.deleteShip(id);
       message.success('船舶已删除');
-      await load();
+      const nextPage = page > 1 && items.length === 1 ? page - 1 : page;
+      await load(keyword, nextPage, pageSize);
     } catch (err) {
       message.error(err instanceof Error ? err.message : '删除船舶失败');
     } finally {
@@ -95,20 +102,31 @@ export default function ShipsPage() {
             onSearch={(value) => {
               const nextKeyword = value.trim();
               setKeyword(nextKeyword);
-              load(nextKeyword);
+              void load(nextKeyword, 1, pageSize);
             }}
           />
-          <Button icon={<RefreshCw size={16} />} loading={loading} onClick={() => load()} />
+          <Button icon={<RefreshCw size={16} />} loading={loading} onClick={() => void load(keyword, page, pageSize)} />
           <Button type="primary" icon={<Plus size={16} />} onClick={() => showModal()}>
             新增船舶
           </Button>
         </Space>
       </div>
-      {error && <Alert type="error" showIcon message="船舶列表加载失败" description={error} action={<Button onClick={() => load()}>重试</Button>} />}
+      {error && <Alert type="error" showIcon message="船舶列表加载失败" description={error} action={<Button onClick={() => void load(keyword, page, pageSize)}>重试</Button>} />}
+      <Typography.Text type="secondary">当前显示 {items.length} / {total} 艘船舶</Typography.Text>
       <Table
         rowKey="id"
         loading={loading}
         dataSource={items}
+        pagination={{
+          current: page,
+          pageSize,
+          total,
+          showSizeChanger: true,
+          showTotal: (value) => `共 ${value} 艘`,
+          onChange: (nextPage, nextPageSize) => {
+            void load(keyword, nextPage, nextPageSize);
+          },
+        }}
         locale={{
           emptyText: error ? '列表加载失败，请重试' : '暂无船舶数据',
         }}

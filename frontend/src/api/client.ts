@@ -52,6 +52,23 @@ type TrackQuery = {
   end?: string;
 };
 
+type PaginationQuery = {
+  page?: number;
+  size?: number;
+};
+
+function appendPagination(params: URLSearchParams, pagination?: PaginationQuery) {
+  if (!pagination) {
+    return;
+  }
+  if (pagination.page !== undefined) {
+    params.set('page', String(pagination.page));
+  }
+  if (pagination.size !== undefined) {
+    params.set('size', String(pagination.size));
+  }
+}
+
 export const api = {
   login: (username: string, password: string) =>
     request<LoginResponse>('/auth/login', {
@@ -59,7 +76,13 @@ export const api = {
       body: JSON.stringify({ username, password }),
     }),
   logout: () => request<void>('/auth/logout', { method: 'POST', body: JSON.stringify({}) }),
-  ships: (keyword = '') => request<ShipPageResult>(`/ships?keyword=${encodeURIComponent(keyword)}`),
+  ships: (keyword = '', pagination?: PaginationQuery) => {
+    const params = new URLSearchParams();
+    if (keyword.trim()) params.set('keyword', keyword.trim());
+    appendPagination(params, pagination);
+    const query = params.toString();
+    return request<ShipPageResult>(`/ships${query ? `?${query}` : ''}`);
+  },
   createShip: (ship: ShipUpsertRequest) => request<Ship>('/ships', { method: 'POST', body: JSON.stringify(ship) }),
   updateShip: (id: number, ship: ShipUpsertRequest) => request<Ship>(`/ships/${id}`, { method: 'PUT', body: JSON.stringify(ship) }),
   deleteShip: (id: number) => request<void>(`/ships/${id}`, { method: 'DELETE' }),
@@ -75,9 +98,21 @@ export const api = {
     const query = params.toString();
     return request<TrackListResponse>(`/ships/${shipId}/tracks${query ? `?${query}` : ''}`);
   },
-  alarms: (status = '') => request<AlarmPageResult>(`/alarms?status=${encodeURIComponent(status)}`),
+  alarms: (status = '', pagination?: PaginationQuery) => {
+    const params = new URLSearchParams();
+    if (status) params.set('status', status);
+    appendPagination(params, pagination);
+    const query = params.toString();
+    return request<AlarmPageResult>(`/alarms${query ? `?${query}` : ''}`);
+  },
   ackAlarm: (id: number) => request<Alarm>(`/alarms/${id}/ack`, { method: 'PUT', body: JSON.stringify({}) }),
-  dispatchEvents: (status = '') => request<DispatchEventPageResult>(`/dispatch-events?status=${encodeURIComponent(status)}`),
+  dispatchEvents: (status = '', pagination?: PaginationQuery) => {
+    const params = new URLSearchParams();
+    if (status) params.set('status', status);
+    appendPagination(params, pagination);
+    const query = params.toString();
+    return request<DispatchEventPageResult>(`/dispatch-events${query ? `?${query}` : ''}`);
+  },
   createDispatchEvent: (event: DispatchEventCreateRequest) =>
     request<DispatchEvent>('/dispatch-events', { method: 'POST', body: JSON.stringify(event) }),
   updateDispatchStatus: (id: number, payload: DispatchStatusUpdateRequest) =>
@@ -86,7 +121,12 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   battleScenarios: () => request<BattleScenarioListResponse>('/battle/scenarios'),
-  battleSessions: () => request<BattleSessionPageResult>('/battle/sessions'),
+  battleSessions: (pagination?: PaginationQuery) => {
+    const params = new URLSearchParams();
+    appendPagination(params, pagination);
+    const query = params.toString();
+    return request<BattleSessionPageResult>(`/battle/sessions${query ? `?${query}` : ''}`);
+  },
   createBattleSession: (payload: BattleSessionCreateRequest) =>
     request<BattleSessionCreateResponse>('/battle/sessions', {
       method: 'POST',
@@ -114,6 +154,25 @@ export const api = {
 
 export async function getSimulatorStatus() {
   return request<AnalyticsProxyResponse>('/analytics/simulate/status');
+}
+
+export async function listAllShips(keyword = '') {
+  const size = 100;
+  let page = 1;
+  let total = 0;
+  const items: Ship[] = [];
+
+  do {
+    const data = await api.ships(keyword, { page, size });
+    items.push(...data.items);
+    total = data.total;
+    if (data.items.length === 0) {
+      break;
+    }
+    page += 1;
+  } while (items.length < total);
+
+  return items;
 }
 
 export async function startSimulator(shipIds: number[]) {

@@ -1,7 +1,7 @@
 import { Alert, Button, Card, List, Select, Space, Tag, Typography, message } from 'antd';
 import { Play, Radio, RefreshCw, Square } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { api, getSimulatorStatus, startSimulator, stopSimulator } from '../api/client';
+import { getSimulatorStatus, listAllShips, startSimulator, stopSimulator } from '../api/client';
 import MonitorMap from '../components/MonitorMap';
 import type { AnalyticsProxyResponse, Ship, ShipLocation } from '../types';
 
@@ -70,11 +70,11 @@ export default function MonitorPage({ locations, wsStatus }: Props) {
     setShipsLoading(true);
     setShipsError('');
     try {
-      const data = await api.ships();
-      setShips(data.items);
+      const items = await listAllShips();
+      setShips(items);
       setSelectedShipIds((current) => {
-        const next = current.filter((id) => data.items.some((ship) => ship.id === id));
-        return next.length ? next : data.items.slice(0, 2).map((ship) => ship.id);
+        const next = current.filter((id) => items.some((ship) => ship.id === id));
+        return next.length ? next : items.slice(0, 2).map((ship) => ship.id);
       });
     } catch (err) {
       const text = err instanceof Error ? err.message : '加载模拟船舶失败';

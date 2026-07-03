@@ -1,7 +1,7 @@
 import { Alert, Button, Form, Input, Modal, Select, Space, Table, Tag, Typography, message } from 'antd';
 import { Plus, RefreshCw } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { api } from '../api/client';
+import { api, listAllShips } from '../api/client';
 import type { DispatchEvent, Ship } from '../types';
 
 const statuses = ['NEW', 'DISPATCHED', 'PROCESSING', 'COMPLETED', 'CANCELLED'];
@@ -86,7 +86,7 @@ export default function DispatchPage({ items, onItemsChange }: Props) {
     setLoading(true);
     setError('');
     try {
-      const data = await api.dispatchEvents();
+      const data = await api.dispatchEvents('', { page: 1, size: 100 });
       onItemsChange(data.items);
     } catch (err) {
       const text = err instanceof Error ? err.message : '加载调度事件失败';
@@ -101,8 +101,7 @@ export default function DispatchPage({ items, onItemsChange }: Props) {
     setShipsLoading(true);
     setShipsError('');
     try {
-      const data = await api.ships();
-      setShips(data.items);
+      setShips(await listAllShips());
     } catch (err) {
       const text = err instanceof Error ? err.message : '加载船舶列表失败';
       setShipsError(text);

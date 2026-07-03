@@ -1,7 +1,7 @@
 import { Alert, Button, Input, Select, Space, Table, Typography, message } from 'antd';
 import { RefreshCw, Search } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { api } from '../api/client';
+import { api, listAllShips } from '../api/client';
 import MonitorMap from '../components/MonitorMap';
 import type { Ship, ShipLocation } from '../types';
 
@@ -47,9 +47,9 @@ export default function TracksPage() {
     setShipsLoading(true);
     setError('');
     try {
-      const res = await api.ships();
-      setShips(res.items);
-      setShipId((current) => (current && res.items.some((ship) => ship.id === current) ? current : res.items[0]?.id));
+      const items = await listAllShips();
+      setShips(items);
+      setShipId((current) => (current && items.some((ship) => ship.id === current) ? current : items[0]?.id));
     } catch (err) {
       const text = err instanceof Error ? err.message : '加载船舶列表失败';
       setError(text);
