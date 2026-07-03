@@ -76,6 +76,16 @@ class CollectReleaseEvidenceScriptTest(unittest.TestCase):
             include_retention_preview=False,
             include_capacity_estimate=False,
         )
+        frontend_e2e_steps = MODULE.selected_steps(
+            include_runtime=False,
+            include_runtime_precheck=False,
+            include_db_integration=False,
+            include_backup_restore_drill=False,
+            include_runtime_observability_snapshot=False,
+            include_retention_preview=False,
+            include_capacity_estimate=False,
+            include_frontend_e2e=True,
+        )
         retention_steps = MODULE.selected_steps(
             include_runtime=False,
             include_runtime_precheck=False,
@@ -109,6 +119,8 @@ class CollectReleaseEvidenceScriptTest(unittest.TestCase):
         self.assertEqual("03-backup-restore-drill.txt", backup_steps[-1].output_file)
         self.assertEqual(["migration-status", "preflight", "runtime-observability-snapshot"], [item.name for item in observability_steps])
         self.assertEqual("03-runtime-observability-snapshot.txt", observability_steps[-1].output_file)
+        self.assertEqual(["migration-status", "preflight", "frontend-e2e"], [item.name for item in frontend_e2e_steps])
+        self.assertEqual("03-frontend-e2e.txt", frontend_e2e_steps[-1].output_file)
         self.assertEqual(["migration-status", "preflight", "retention-preview"], [item.name for item in retention_steps])
         self.assertEqual("03-retention-preview.txt", retention_steps[-1].output_file)
         self.assertEqual(["migration-status", "preflight", "capacity-estimate"], [item.name for item in capacity_steps])
@@ -123,12 +135,14 @@ class CollectReleaseEvidenceScriptTest(unittest.TestCase):
             include_runtime_observability_snapshot=True,
             include_retention_preview=True,
             include_capacity_estimate=True,
+            include_frontend_e2e=True,
         )
 
         self.assertEqual(
             [
                 "migration-status",
                 "preflight",
+                "frontend-e2e",
                 "runtime-precheck",
                 "smoke-check",
                 "db-integration",
@@ -143,13 +157,14 @@ class CollectReleaseEvidenceScriptTest(unittest.TestCase):
             [
                 "01-migrate-status.txt",
                 "02-preflight.txt",
-                "03-runtime-precheck.txt",
-                "04-smoke-check.txt",
-                "05-db-integration.txt",
-                "06-backup-restore-drill.txt",
-                "07-runtime-observability-snapshot.txt",
-                "08-retention-preview.txt",
-                "09-capacity-estimate.txt",
+                "03-frontend-e2e.txt",
+                "04-runtime-precheck.txt",
+                "05-smoke-check.txt",
+                "06-db-integration.txt",
+                "07-backup-restore-drill.txt",
+                "08-runtime-observability-snapshot.txt",
+                "09-retention-preview.txt",
+                "10-capacity-estimate.txt",
             ],
             [item.output_file for item in steps],
         )
@@ -166,6 +181,19 @@ class CollectReleaseEvidenceScriptTest(unittest.TestCase):
         self.assertEqual(0, result.exitCode)
         self.assertIn("stdout:", output)
         self.assertIn("ok", output)
+
+    def test_run_step_records_missing_command_as_failed_output(self) -> None:
+        step = MODULE.EvidenceStep("frontend-e2e", ["npm", "run", "test:e2e"], ROOT / "frontend", "03-frontend-e2e.txt")
+        missing = FileNotFoundError(2, "No such file or directory", "npm")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with mock.patch.object(MODULE.subprocess, "run", side_effect=missing):
+                result = MODULE.run_step(step, Path(tmpdir))
+
+            output = (Path(tmpdir) / "03-frontend-e2e.txt").read_text(encoding="utf-8")
+
+        self.assertEqual("frontend-e2e", result.name)
+        self.assertEqual(127, result.exitCode)
+        self.assertIn("could not start command: npm", output)
 
     def test_main_writes_manifest_even_when_a_step_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -208,6 +236,7 @@ class CollectReleaseEvidenceScriptTest(unittest.TestCase):
                 include_db_integration=True,
                 include_backup_restore_drill=True,
                 include_runtime_observability_snapshot=True,
+                include_frontend_e2e=True,
                 include_retention_preview=True,
                 include_capacity_estimate=True,
                 continue_on_failure=False,
@@ -227,6 +256,7 @@ class CollectReleaseEvidenceScriptTest(unittest.TestCase):
         self.assertTrue(manifest["includeDbIntegration"])
         self.assertTrue(manifest["includeBackupRestoreDrill"])
         self.assertTrue(manifest["includeRuntimeObservabilitySnapshot"])
+        self.assertTrue(manifest["includeFrontendE2E"])
         self.assertTrue(manifest["includeRetentionPreview"])
         self.assertTrue(manifest["includeCapacityEstimate"])
         self.assertEqual("smoke-check", manifest["steps"][0]["name"])

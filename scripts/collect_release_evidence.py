@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 from dataclasses import asdict, dataclass
@@ -45,6 +46,7 @@ def main() -> int:
         include_db_integration=args.include_db_integration,
         include_backup_restore_drill=args.include_backup_restore_drill,
         include_runtime_observability_snapshot=args.include_runtime_observability_snapshot,
+        include_frontend_e2e=getattr(args, "include_frontend_e2e", False),
         include_retention_preview=args.include_retention_preview,
         include_capacity_estimate=args.include_capacity_estimate,
     )
@@ -56,6 +58,7 @@ def main() -> int:
         "includeDbIntegration": args.include_db_integration,
         "includeBackupRestoreDrill": args.include_backup_restore_drill,
         "includeRuntimeObservabilitySnapshot": args.include_runtime_observability_snapshot,
+        "includeFrontendE2E": getattr(args, "include_frontend_e2e", False),
         "includeRetentionPreview": args.include_retention_preview,
         "includeCapacityEstimate": args.include_capacity_estimate,
         "steps": [],
@@ -112,6 +115,11 @@ def parse_args() -> argparse.Namespace:
         help="Also run scripts/run_runtime_observability_snapshot.py and archive its output. Requires a running stack.",
     )
     parser.add_argument(
+        "--include-frontend-e2e",
+        action="store_true",
+        help="Also run frontend Playwright browser regressions via npm run test:e2e and archive the console output.",
+    )
+    parser.add_argument(
         "--include-retention-preview",
         action="store_true",
         help="Also run scripts/retention_maintenance.py in preview mode and archive its output.",
@@ -138,11 +146,12 @@ def selected_steps(
     include_runtime_observability_snapshot: bool,
     include_retention_preview: bool,
     include_capacity_estimate: bool,
+    include_frontend_e2e: bool = False,
 ) -> list[EvidenceStep]:
     steps = [
         EvidenceStep(
             "migration-status",
-            ["go", "run", "./cmd/migrate", "-action=status"],
+            [tool_path("go"), "run", "./cmd/migrate", "-action=status"],
             ROOT / "backend",
             "01-migrate-status.txt",
         ),
@@ -153,13 +162,22 @@ def selected_steps(
             "02-preflight.txt",
         ),
     ]
+    if include_frontend_e2e:
+        steps.append(
+            EvidenceStep(
+                "frontend-e2e",
+                [tool_path("npm"), "run", "test:e2e"],
+                ROOT / "frontend",
+                "03-frontend-e2e.txt",
+            )
+        )
     if include_runtime_precheck:
         steps.append(
             EvidenceStep(
                 "runtime-precheck",
                 [sys.executable, "scripts/runtime_precheck.py"],
                 ROOT,
-                "03-runtime-precheck.txt",
+                "04-runtime-precheck.txt" if include_frontend_e2e else "03-runtime-precheck.txt",
             )
         )
     if include_runtime:
@@ -168,7 +186,17 @@ def selected_steps(
                 "smoke-check",
                 [sys.executable, "scripts/smoke_check.py"],
                 ROOT,
-                "04-smoke-check.txt" if include_runtime_precheck else "03-smoke-check.txt",
+                evidence_filename(
+                    include_runtime=include_runtime,
+                    include_runtime_precheck=include_runtime_precheck,
+                    include_db_integration=include_db_integration,
+                    include_backup_restore_drill=include_backup_restore_drill,
+                    include_runtime_observability_snapshot=include_runtime_observability_snapshot,
+                    include_retention_preview=include_retention_preview,
+                    include_capacity_estimate=include_capacity_estimate,
+                    include_frontend_e2e=include_frontend_e2e,
+                    step_name="smoke-check",
+                ),
             )
         )
     if include_db_integration:
@@ -177,8 +205,16 @@ def selected_steps(
                 "db-integration",
                 [sys.executable, "scripts/run_repository_db_integration.py"],
                 ROOT,
-                "05-db-integration.txt" if include_runtime and include_runtime_precheck else (
-                    "04-db-integration.txt" if include_runtime or include_runtime_precheck else "03-db-integration.txt"
+                evidence_filename(
+                    include_runtime=include_runtime,
+                    include_runtime_precheck=include_runtime_precheck,
+                    include_db_integration=True,
+                    include_backup_restore_drill=include_backup_restore_drill,
+                    include_runtime_observability_snapshot=include_runtime_observability_snapshot,
+                    include_retention_preview=include_retention_preview,
+                    include_capacity_estimate=include_capacity_estimate,
+                    include_frontend_e2e=include_frontend_e2e,
+                    step_name="db-integration",
                 ),
             )
         )
@@ -196,6 +232,7 @@ def selected_steps(
                     include_runtime_observability_snapshot=include_runtime_observability_snapshot,
                     include_retention_preview=include_retention_preview,
                     include_capacity_estimate=include_capacity_estimate,
+                    include_frontend_e2e=include_frontend_e2e,
                     step_name="backup-restore-drill",
                 ),
             )
@@ -214,6 +251,7 @@ def selected_steps(
                     include_runtime_observability_snapshot=True,
                     include_retention_preview=include_retention_preview,
                     include_capacity_estimate=include_capacity_estimate,
+                    include_frontend_e2e=include_frontend_e2e,
                     step_name="runtime-observability-snapshot",
                 ),
             )
@@ -232,6 +270,7 @@ def selected_steps(
                     include_runtime_observability_snapshot=include_runtime_observability_snapshot,
                     include_retention_preview=True,
                     include_capacity_estimate=include_capacity_estimate,
+                    include_frontend_e2e=include_frontend_e2e,
                     step_name="retention-preview",
                 ),
             )
@@ -262,6 +301,7 @@ def selected_steps(
                     include_runtime_observability_snapshot=include_runtime_observability_snapshot,
                     include_retention_preview=include_retention_preview,
                     include_capacity_estimate=True,
+                    include_frontend_e2e=include_frontend_e2e,
                     step_name="capacity-estimate",
                 ),
             )
@@ -278,11 +318,20 @@ def evidence_filename(
     include_runtime_observability_snapshot: bool,
     include_retention_preview: bool,
     include_capacity_estimate: bool,
+    include_frontend_e2e: bool = False,
     step_name: str,
 ) -> str:
     index = 3
+    if step_name == "frontend-e2e" and include_frontend_e2e:
+        return f"{index:02d}-frontend-e2e.txt"
+    if include_frontend_e2e:
+        index += 1
+    if step_name == "runtime-precheck" and include_runtime_precheck:
+        return f"{index:02d}-runtime-precheck.txt"
     if include_runtime_precheck:
         index += 1
+    if step_name == "smoke-check" and include_runtime:
+        return f"{index:02d}-smoke-check.txt"
     if include_runtime:
         index += 1
     if step_name == "db-integration":
@@ -308,16 +357,25 @@ def evidence_filename(
 
 def run_step(step: EvidenceStep, output_dir: Path) -> StepResult:
     output_path = output_dir / step.output_file
-    completed = subprocess.run(
-        step.command,
-        cwd=step.cwd,
-        check=False,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        env=os.environ.copy(),
-    )
+    try:
+        completed = subprocess.run(
+            step.command,
+            cwd=step.cwd,
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=os.environ.copy(),
+        )
+    except FileNotFoundError as exc:
+        missing = exc.filename or step.command[0]
+        completed = subprocess.CompletedProcess(
+            args=step.command,
+            returncode=127,
+            stdout="",
+            stderr=f"[FAIL] {step.name} could not start command: {missing}\n",
+        )
     output_path.write_text(render_step_output(step, completed), encoding="utf-8")
     print(f"[{'OK' if completed.returncode == 0 else 'FAIL'}] {step.name} -> {output_path.name}")
     return StepResult(
@@ -364,6 +422,10 @@ def quote_part(part: str) -> str:
     if not part or any(ch.isspace() for ch in part):
         return f'"{part}"'
     return part
+
+
+def tool_path(name: str) -> str:
+    return shutil.which(name) or name
 
 
 if __name__ == "__main__":

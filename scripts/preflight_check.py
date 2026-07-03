@@ -73,6 +73,8 @@ def main() -> int:
         print("Runtime smoke checks were included.")
     if any(check.name == "repository DB integration tests" for check in checks):
         print("Repository DB integration checks were included.")
+    if any(check.name == "frontend e2e" for check in checks):
+        print("Frontend E2E checks were included.")
     return 0
 
 
@@ -97,6 +99,7 @@ def parse_args() -> argparse.Namespace:
             "runtime-observability-snapshot",
             "db-integration",
             "backup-restore-drill",
+            "frontend-e2e",
             "retention-preview",
             "capacity-estimate",
         ),
@@ -137,6 +140,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Run the estimate-only battle replay capacity projection used to size retention thresholds.",
     )
+    parser.add_argument(
+        "--include-frontend-e2e",
+        action="store_true",
+        help="Run the mocked Playwright browser regression suite in frontend/ via npm run test:e2e.",
+    )
     return parser.parse_args()
 
 
@@ -164,6 +172,16 @@ def selected_checks(args: argparse.Namespace) -> list[Check]:
             hint=(
                 "On Windows sandboxed shells, Python subprocess may trigger Node EPERM while starting npm. "
                 "If that happens, run `cd frontend && npm run build` directly and keep its output with the preflight evidence."
+            ),
+            capture_output=os.name == "nt",
+        ),
+        "frontend-e2e": Check(
+            "frontend e2e",
+            [tool_path("npm"), "run", "test:e2e"],
+            ROOT / "frontend",
+            hint=(
+                "On Windows sandboxed shells, Python subprocess may trigger Node EPERM while starting npm. "
+                "If that happens, run `cd frontend && npm run test:e2e` directly and keep its output with the preflight evidence."
             ),
             capture_output=os.name == "nt",
         ),
@@ -210,6 +228,9 @@ def selected_checks(args: argparse.Namespace) -> list[Check]:
     include_capacity_estimate = flag_enabled(args, "include_capacity_estimate") or (
         args.only is not None and "capacity-estimate" in args.only
     )
+    include_frontend_e2e = flag_enabled(args, "include_frontend_e2e") or (
+        args.only is not None and "frontend-e2e" in args.only
+    )
     extra_checks: list[Check] = []
     if flag_enabled(args, "include_runtime_smoke"):
         extra_checks.extend([checks["runtime-precheck"], RUNTIME_SMOKE_CHECK])
@@ -221,6 +242,8 @@ def selected_checks(args: argparse.Namespace) -> list[Check]:
         extra_checks.append(checks["backup-restore-drill"])
     if include_compose_override:
         extra_checks.append(checks["compose-override"])
+    if include_frontend_e2e:
+        extra_checks.append(checks["frontend-e2e"])
     if include_retention_preview:
         extra_checks.append(checks["retention-preview"])
     if include_capacity_estimate:
@@ -292,10 +315,11 @@ def run_check(check: Check) -> float:
     if completed.returncode != 0:
         if check.hint:
             print(f"[HINT] {check.hint}")
-        if check.name == "frontend build" and is_known_windows_node_realpath_eperm(completed):
+        if check.name in {"frontend build", "frontend e2e"} and is_known_windows_node_realpath_eperm(completed):
+            direct_command = "npm run build" if check.name == "frontend build" else "npm run test:e2e"
             raise SystemExit(
-                "[FAIL] frontend build hit the known Windows/Codex Node realpath sandbox limitation; "
-                "run `cd frontend && npm run build` directly and keep its output as the frontend gate evidence"
+                f"[FAIL] {check.name} hit the known Windows/Codex Node realpath sandbox limitation; "
+                f"run `cd frontend && {direct_command}` directly and keep its output as the {check.name} evidence"
             )
         raise SystemExit(f"[FAIL] {check.name} failed after {elapsed:.1f}s with exit code {completed.returncode}")
     print(f"[ OK ] {check.name} ({elapsed:.1f}s)")

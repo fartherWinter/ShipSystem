@@ -350,6 +350,43 @@ class PreflightCheckScriptTest(unittest.TestCase):
         self.assertIn("capacity estimate", names)
         self.assertEqual("capacity estimate", names[-1])
 
+    def test_frontend_e2e_is_opt_in_for_default_preflight(self) -> None:
+        args = argparse.Namespace(
+            only=None,
+            include_runtime_smoke=False,
+            include_db_integration=False,
+            include_runtime_observability_snapshot=False,
+            include_backup_restore_drill=False,
+            include_compose_override=False,
+            include_retention_preview=False,
+            include_capacity_estimate=False,
+            include_frontend_e2e=True,
+        )
+
+        checks = MODULE.selected_checks(args)
+        names = [check.name for check in checks]
+
+        self.assertIn("frontend e2e", names)
+        self.assertEqual("frontend e2e", names[-1])
+
+    def test_only_frontend_e2e_selects_playwright_command(self) -> None:
+        args = argparse.Namespace(
+            only=["frontend-e2e"],
+            include_runtime_smoke=False,
+            include_db_integration=False,
+            include_runtime_observability_snapshot=False,
+            include_backup_restore_drill=False,
+            include_compose_override=False,
+            include_retention_preview=False,
+            include_capacity_estimate=False,
+        )
+
+        checks = MODULE.selected_checks(args)
+
+        self.assertEqual(1, len(checks))
+        self.assertEqual("frontend e2e", checks[0].name)
+        self.assertEqual(["run", "test:e2e"], checks[0].command[1:])
+
     def test_only_capacity_estimate_selects_estimate_script(self) -> None:
         args = argparse.Namespace(
             only=["capacity-estimate"],
@@ -449,6 +486,25 @@ class PreflightCheckScriptTest(unittest.TestCase):
 
         self.assertEqual(1, len(checks))
         self.assertEqual("frontend build", checks[0].name)
+        self.assertTrue(checks[0].capture_output)
+
+    def test_frontend_e2e_check_captures_output_on_windows(self) -> None:
+        args = argparse.Namespace(
+            only=["frontend-e2e"],
+            include_runtime_smoke=False,
+            include_db_integration=False,
+            include_runtime_observability_snapshot=False,
+            include_backup_restore_drill=False,
+            include_compose_override=False,
+            include_retention_preview=False,
+            include_capacity_estimate=False,
+        )
+
+        with mock.patch.object(MODULE.os, "name", "nt"):
+            checks = MODULE.selected_checks(args)
+
+        self.assertEqual(1, len(checks))
+        self.assertEqual("frontend e2e", checks[0].name)
         self.assertTrue(checks[0].capture_output)
 
     def test_runtime_observability_snapshot_is_opt_in_for_default_preflight(self) -> None:
