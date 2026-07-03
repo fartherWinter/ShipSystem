@@ -684,6 +684,29 @@ func TestListTracksReturnsNotFoundWhenShipDoesNotExist(t *testing.T) {
 	}
 }
 
+func TestListTracksReturnsInternalServerErrorWithoutLeakingStorageError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, &fakeAppService{
+		listTracksFn: func(ctx context.Context, shipID uint, start, end *time.Time) ([]models.ShipLocation, error) {
+			return nil, io.ErrUnexpectedEOF
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.GET("/ships/:id/tracks", handler.ListTracks)
+
+	req := httptest.NewRequest(http.MethodGet, "/ships/42/tracks", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["message"] != "failed to list tracks" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
 func TestUpdateShipReturnsNotFoundWhenShipDoesNotExist(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	handler := NewHandler(nil, &fakeAppService{
@@ -708,6 +731,54 @@ func TestUpdateShipReturnsNotFoundWhenShipDoesNotExist(t *testing.T) {
 	}
 }
 
+func TestUpdateShipReturnsValidationMessage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, &fakeAppService{
+		updateShipFn: func(ctx context.Context, id uint, patch models.Ship) (models.Ship, error) {
+			return models.Ship{}, services.NewValidationError("船舶状态不合法")
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.PUT("/ships/:id", handler.UpdateShip)
+
+	req := httptest.NewRequest(http.MethodPut, "/ships/42", bytes.NewBufferString(`{"name":"Voyager","mmsi":"123456789"}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["message"] != "船舶状态不合法" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
+func TestUpdateShipReturnsInternalServerErrorWithoutLeakingStorageError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, &fakeAppService{
+		updateShipFn: func(ctx context.Context, id uint, patch models.Ship) (models.Ship, error) {
+			return models.Ship{}, io.ErrUnexpectedEOF
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.PUT("/ships/:id", handler.UpdateShip)
+
+	req := httptest.NewRequest(http.MethodPut, "/ships/42", bytes.NewBufferString(`{"name":"Voyager","mmsi":"123456789"}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["message"] != "failed to update ship" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
 func TestDeleteShipReturnsNotFoundWhenShipDoesNotExist(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	handler := NewHandler(nil, &fakeAppService{
@@ -727,6 +798,29 @@ func TestDeleteShipReturnsNotFoundWhenShipDoesNotExist(t *testing.T) {
 	}
 	body := decodeJSONBody(t, recorder)
 	if body["message"] != "ship does not exist" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
+func TestDeleteShipReturnsInternalServerErrorWithoutLeakingStorageError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, &fakeAppService{
+		deleteShipFn: func(ctx context.Context, id uint) error {
+			return io.ErrUnexpectedEOF
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.DELETE("/ships/:id", handler.DeleteShip)
+
+	req := httptest.NewRequest(http.MethodDelete, "/ships/42", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["message"] != "failed to delete ship" {
 		t.Fatalf("unexpected body: %#v", body)
 	}
 }
@@ -755,6 +849,30 @@ func TestReportLocationReturnsNotFoundWhenShipDoesNotExist(t *testing.T) {
 	}
 }
 
+func TestReportLocationReturnsInternalServerErrorWithoutLeakingStorageError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, &fakeAppService{
+		reportLocationFn: func(ctx context.Context, loc *models.ShipLocation) (*models.Alarm, error) {
+			return nil, io.ErrUnexpectedEOF
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.POST("/ships/:id/locations", handler.ReportLocation)
+
+	req := httptest.NewRequest(http.MethodPost, "/ships/42/locations", bytes.NewBufferString(`{"longitude":120.1,"latitude":30.2,"speedKnots":12.5,"course":90}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["message"] != "failed to report location" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
 func TestAckAlarmReturnsNotFoundWhenAlarmDoesNotExist(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	handler := NewHandler(nil, &fakeAppService{
@@ -774,6 +892,29 @@ func TestAckAlarmReturnsNotFoundWhenAlarmDoesNotExist(t *testing.T) {
 	}
 	body := decodeJSONBody(t, recorder)
 	if body["message"] != "alarm does not exist" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
+func TestAckAlarmReturnsInternalServerErrorWithoutLeakingStorageError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, &fakeAppService{
+		ackAlarmFn: func(ctx context.Context, id, userID uint) (models.Alarm, error) {
+			return models.Alarm{}, io.ErrUnexpectedEOF
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.PUT("/alarms/:id/ack", handler.AckAlarm)
+
+	req := httptest.NewRequest(http.MethodPut, "/alarms/9/ack", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["message"] != "failed to ack alarm" {
 		t.Fatalf("unexpected body: %#v", body)
 	}
 }
@@ -965,6 +1106,29 @@ func TestGetBattleTimelineReturnsNotFoundWhenSessionDoesNotExist(t *testing.T) {
 	}
 }
 
+func TestGetBattleTimelineReturnsInternalServerErrorWithoutLeakingStorageError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, &fakeAppService{
+		listBattleTimelineFn: func(ctx context.Context, sessionID string) ([]services.BattleTimelineItem, error) {
+			return nil, io.ErrUnexpectedEOF
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.GET("/battle/sessions/:sessionId/timeline", handler.GetBattleTimeline)
+
+	req := httptest.NewRequest(http.MethodGet, "/battle/sessions/session-1/timeline", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["message"] != "failed to load battle timeline" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
 func TestCreateBattleSessionReturnsValidationMessage(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	handler := NewHandler(nil, &fakeAppService{
@@ -985,6 +1149,30 @@ func TestCreateBattleSessionReturnsValidationMessage(t *testing.T) {
 	}
 	body := decodeJSONBody(t, recorder)
 	if body["message"] != "battle scenario does not exist" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
+func TestCreateBattleSessionReturnsInternalServerErrorWithoutLeakingStorageError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, &fakeAppService{
+		createBattleSessionFn: func(ctx context.Context, scenarioCode string) (models.BattleSession, services.BattleStateSnapshot, error) {
+			return models.BattleSession{}, services.BattleStateSnapshot{}, io.ErrUnexpectedEOF
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.POST("/battle/sessions", handler.CreateBattleSession)
+
+	req := httptest.NewRequest(http.MethodPost, "/battle/sessions", bytes.NewBufferString(`{"scenarioCode":"open-water-duel"}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["message"] != "failed to create battle session" {
 		t.Fatalf("unexpected body: %#v", body)
 	}
 }
@@ -1058,6 +1246,29 @@ func TestListBattleSnapshotsReturnsNotFoundWhenSessionDoesNotExist(t *testing.T)
 	}
 }
 
+func TestListBattleSnapshotsReturnsInternalServerErrorWithoutLeakingStorageError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, &fakeAppService{
+		listBattleSnapshotsFn: func(ctx context.Context, sessionID string, fromTick, toTick *int64) ([]services.BattleSnapshotView, error) {
+			return nil, io.ErrUnexpectedEOF
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.GET("/battle/sessions/:sessionId/snapshots", handler.ListBattleSnapshots)
+
+	req := httptest.NewRequest(http.MethodGet, "/battle/sessions/session-1/snapshots", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["message"] != "failed to load battle snapshots" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
 func TestGetBattleReportReturnsNotFoundWhenSessionDoesNotExist(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	handler := NewHandler(nil, &fakeAppService{
@@ -1081,6 +1292,29 @@ func TestGetBattleReportReturnsNotFoundWhenSessionDoesNotExist(t *testing.T) {
 	}
 }
 
+func TestGetBattleReportReturnsInternalServerErrorWithoutLeakingStorageError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, &fakeAppService{
+		getBattleReportFn: func(ctx context.Context, sessionID string) (services.BattleReport, error) {
+			return services.BattleReport{}, io.ErrUnexpectedEOF
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.GET("/battle/sessions/:sessionId/report", handler.GetBattleReport)
+
+	req := httptest.NewRequest(http.MethodGet, "/battle/sessions/session-1/report", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["message"] != "failed to load battle report" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
 func TestStopBattleSessionReturnsNotFoundWhenSessionDoesNotExist(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	handler := NewHandler(nil, &fakeAppService{
@@ -1100,6 +1334,29 @@ func TestStopBattleSessionReturnsNotFoundWhenSessionDoesNotExist(t *testing.T) {
 	}
 	body := decodeJSONBody(t, recorder)
 	if body["message"] != "battle session does not exist" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
+func TestStopBattleSessionReturnsInternalServerErrorWithoutLeakingStorageError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, &fakeAppService{
+		stopBattleSessionFn: func(ctx context.Context, sessionID string) (services.BattleStateSnapshot, error) {
+			return services.BattleStateSnapshot{}, io.ErrUnexpectedEOF
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.POST("/battle/sessions/:sessionId/stop", handler.StopBattleSession)
+
+	req := httptest.NewRequest(http.MethodPost, "/battle/sessions/session-1/stop", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["message"] != "failed to stop battle session" {
 		t.Fatalf("unexpected body: %#v", body)
 	}
 }
