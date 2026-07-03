@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { emitMockWsMessage, installApiMocks, preloadSavedUser } from './fixtures';
+import { closeMockWsConnections, emitMockWsMessage, installApiMocks, preloadSavedUser } from './fixtures';
 
 test.describe('websocket live updates', () => {
   test('dispatcher dispatch page applies dispatch_event_updated without manual refresh', async ({ page }) => {
@@ -51,6 +51,18 @@ test.describe('websocket live updates', () => {
     });
 
     await expect(page.getByText('#301 123.4567, 32.1234 / 18.2')).toBeVisible();
+  });
+
+  test('viewer monitor page reconnects after websocket disconnect', async ({ page }) => {
+    await preloadSavedUser(page, 'viewer');
+    await installApiMocks(page, 'viewer');
+
+    await page.goto('/monitor');
+    await expect(page.getByText('connected')).toBeVisible();
+
+    await closeMockWsConnections(page);
+    await expect(page.getByText('disconnected')).toBeVisible();
+    await expect(page.getByText('connected')).toBeVisible({ timeout: 3000 });
   });
 
   test('viewer battle page applies battle_state_updated without starting a local session', async ({ page }) => {

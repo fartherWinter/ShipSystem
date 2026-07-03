@@ -5,6 +5,7 @@ type RoleCode = 'super_admin' | 'admin' | 'dispatcher' | 'viewer';
 declare global {
   interface Window {
     __mockWsEmit?: (payload: unknown) => void;
+    __mockWsCloseAll?: () => void;
   }
 }
 
@@ -726,6 +727,15 @@ export async function emitMockWsMessage(page: Page, payload: unknown): Promise<v
   }, payload);
 }
 
+export async function closeMockWsConnections(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    if (typeof window.__mockWsCloseAll !== 'function') {
+      throw new Error('mock websocket closer is not installed');
+    }
+    window.__mockWsCloseAll();
+  });
+}
+
 async function installMockWebSocket(page: Page): Promise<void> {
   await page.addInitScript(() => {
     const sockets = new Set<MockWebSocket>();
@@ -762,6 +772,13 @@ async function installMockWebSocket(page: Page): Promise<void> {
       sockets.forEach((socket) => {
         if (socket.readyState === MockWebSocket.OPEN) {
           socket.onmessage?.(new MessageEvent('message', { data }));
+        }
+      });
+    };
+    window.__mockWsCloseAll = () => {
+      Array.from(sockets).forEach((socket) => {
+        if (socket.readyState === MockWebSocket.OPEN) {
+          socket.close();
         }
       });
     };
