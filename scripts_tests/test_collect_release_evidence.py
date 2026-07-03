@@ -86,6 +86,17 @@ class CollectReleaseEvidenceScriptTest(unittest.TestCase):
             include_capacity_estimate=False,
             include_frontend_e2e=True,
         )
+        frontend_e2e_without_migration_steps = MODULE.selected_steps(
+            include_runtime=False,
+            include_runtime_precheck=False,
+            include_db_integration=False,
+            include_backup_restore_drill=False,
+            include_runtime_observability_snapshot=False,
+            include_retention_preview=False,
+            include_capacity_estimate=False,
+            include_frontend_e2e=True,
+            skip_migration_status=True,
+        )
         retention_steps = MODULE.selected_steps(
             include_runtime=False,
             include_runtime_precheck=False,
@@ -121,6 +132,9 @@ class CollectReleaseEvidenceScriptTest(unittest.TestCase):
         self.assertEqual("03-runtime-observability-snapshot.txt", observability_steps[-1].output_file)
         self.assertEqual(["migration-status", "preflight", "frontend-e2e"], [item.name for item in frontend_e2e_steps])
         self.assertEqual("03-frontend-e2e.txt", frontend_e2e_steps[-1].output_file)
+        self.assertEqual(["preflight", "frontend-e2e"], [item.name for item in frontend_e2e_without_migration_steps])
+        self.assertEqual("02-preflight.txt", frontend_e2e_without_migration_steps[0].output_file)
+        self.assertEqual("03-frontend-e2e.txt", frontend_e2e_without_migration_steps[-1].output_file)
         self.assertEqual(["migration-status", "preflight", "retention-preview"], [item.name for item in retention_steps])
         self.assertEqual("03-retention-preview.txt", retention_steps[-1].output_file)
         self.assertEqual(["migration-status", "preflight", "capacity-estimate"], [item.name for item in capacity_steps])
@@ -206,6 +220,7 @@ class CollectReleaseEvidenceScriptTest(unittest.TestCase):
                 include_runtime_observability_snapshot=False,
                 include_retention_preview=False,
                 include_capacity_estimate=False,
+                skip_migration_status=False,
                 continue_on_failure=False,
             )
             fake_steps = [
@@ -239,6 +254,7 @@ class CollectReleaseEvidenceScriptTest(unittest.TestCase):
                 include_frontend_e2e=True,
                 include_retention_preview=True,
                 include_capacity_estimate=True,
+                skip_migration_status=True,
                 continue_on_failure=False,
             )
             fake_steps = [MODULE.EvidenceStep("smoke-check", ["python"], ROOT, "04-smoke-check.txt")]
@@ -259,6 +275,7 @@ class CollectReleaseEvidenceScriptTest(unittest.TestCase):
         self.assertTrue(manifest["includeFrontendE2E"])
         self.assertTrue(manifest["includeRetentionPreview"])
         self.assertTrue(manifest["includeCapacityEstimate"])
+        self.assertTrue(manifest["skipMigrationStatus"])
         self.assertEqual("smoke-check", manifest["steps"][0]["name"])
 
     def test_main_can_continue_collecting_after_failure_when_enabled(self) -> None:
@@ -272,6 +289,7 @@ class CollectReleaseEvidenceScriptTest(unittest.TestCase):
                 include_runtime_observability_snapshot=False,
                 include_retention_preview=True,
                 include_capacity_estimate=True,
+                skip_migration_status=False,
                 continue_on_failure=True,
             )
             fake_steps = [

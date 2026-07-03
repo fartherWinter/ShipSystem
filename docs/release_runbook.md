@@ -24,7 +24,7 @@ python scripts/preflight_check.py
 - `python scripts/check_rbac_matrix.py`
 - `cd frontend` then `npm run test:e2e`
 - `python scripts/preflight_check.py --only frontend-e2e`
-- `python scripts/collect_release_evidence.py --continue-on-failure --include-frontend-e2e --output-dir .release-evidence/latest-frontend-e2e`
+- `python scripts/collect_release_evidence.py --skip-migration-status --include-frontend-e2e --output-dir .release-evidence/latest-frontend-e2e`
 
 鍏朵腑 OpenAPI gate 涓嶅啀鍙槸璺敱瀛樺湪鎬ф鏌ワ細瀹冧細鏍￠獙 `docs/openapi.yaml` 涓殑鍙椾繚鎶ゆ帴鍙?`x-roles`銆乸ublic/protected 閴存潈澹版槑銆佸叧閿?requestBody銆佹垚鍔熺姸鎬佺爜浠ュ強甯歌 `400/401/403/404/500/502` 鍝嶅簲鏄惁浠嶄笌 Go handler 濂戠害涓€鑷淬€傚彂甯冨墠鑻ユ湁鎺ュ彛琛屼负鍙樻洿锛岃繖涓?gate 蹇呴』涓€骞堕€氳繃銆?
 瀵逛簬鎵挎媴鍙戝竷闂ㄧ鑱岃矗鐨?Python 鑴氭湰锛岄澶栨墽琛?`python -m unittest discover -s scripts_tests`銆傚綋鍓嶅畠浼氳鐩?OpenAPI 濂戠害鑴氭湰鐨勮嚜瀹氫箟 YAML 瑙ｆ瀽銆乺untime precheck 鐨?Docker 鏈嶅姟鐘舵€佸拰绔彛鍗犵敤璇婃柇鍒嗘敮銆乧ompose baseline 瑙ｆ瀽鏍￠獙銆乻moke gate 鐨勭函鍑芥暟鍜?cookie/requestId 鏈湴绾︽潫锛屼互鍙?frontend API / RBAC / WebSocket event / analytics callback 绛夐潤鎬佸绾﹁剼鏈殑鏍稿績瑙ｆ瀽閫昏緫锛岄伩鍏嶉棬绂佽剼鏈嚜韬洖褰掑悗璇斁琛屻€?

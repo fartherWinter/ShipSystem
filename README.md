@@ -104,7 +104,7 @@ npm run test:e2e
 
 ```bash
 python scripts/preflight_check.py --only frontend-e2e
-python scripts/collect_release_evidence.py --continue-on-failure --include-frontend-e2e --output-dir .release-evidence/latest-frontend-e2e
+python scripts/collect_release_evidence.py --skip-migration-status --include-frontend-e2e --output-dir .release-evidence/latest-frontend-e2e
 ```
 
 ```bash

@@ -49,6 +49,7 @@ def main() -> int:
         include_frontend_e2e=getattr(args, "include_frontend_e2e", False),
         include_retention_preview=args.include_retention_preview,
         include_capacity_estimate=args.include_capacity_estimate,
+        skip_migration_status=getattr(args, "skip_migration_status", False),
     )
     manifest: dict[str, object] = {
         "generatedAt": datetime.now(timezone.utc).isoformat(),
@@ -61,6 +62,7 @@ def main() -> int:
         "includeFrontendE2E": getattr(args, "include_frontend_e2e", False),
         "includeRetentionPreview": args.include_retention_preview,
         "includeCapacityEstimate": args.include_capacity_estimate,
+        "skipMigrationStatus": getattr(args, "skip_migration_status", False),
         "steps": [],
     }
 
@@ -130,6 +132,11 @@ def parse_args() -> argparse.Namespace:
         help="Also run scripts/run_capacity_smoke.py --estimate-only and archive its output.",
     )
     parser.add_argument(
+        "--skip-migration-status",
+        action="store_true",
+        help="Skip the default migration-status step. Useful when collecting frontend-only evidence without a reachable database.",
+    )
+    parser.add_argument(
         "--continue-on-failure",
         action="store_true",
         help="Continue collecting later evidence steps even after one step fails. The command still exits non-zero.",
@@ -147,21 +154,26 @@ def selected_steps(
     include_retention_preview: bool,
     include_capacity_estimate: bool,
     include_frontend_e2e: bool = False,
+    skip_migration_status: bool = False,
 ) -> list[EvidenceStep]:
-    steps = [
-        EvidenceStep(
-            "migration-status",
-            [tool_path("go"), "run", "./cmd/migrate", "-action=status"],
-            ROOT / "backend",
-            "01-migrate-status.txt",
-        ),
+    steps = []
+    if not skip_migration_status:
+        steps.append(
+            EvidenceStep(
+                "migration-status",
+                [tool_path("go"), "run", "./cmd/migrate", "-action=status"],
+                ROOT / "backend",
+                "01-migrate-status.txt",
+            )
+        )
+    steps.append(
         EvidenceStep(
             "preflight",
             [sys.executable, "scripts/preflight_check.py"],
             ROOT,
             "02-preflight.txt",
-        ),
-    ]
+        )
+    )
     if include_frontend_e2e:
         steps.append(
             EvidenceStep(
