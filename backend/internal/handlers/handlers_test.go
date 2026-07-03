@@ -480,6 +480,33 @@ func TestListShipsReturnsInternalServerErrorWithoutLeakingStorageError(t *testin
 	}
 }
 
+func TestListShipsReturnsItemsOnSuccess(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, &fakeAppService{
+		listShipsFn: func(ctx context.Context, keyword string, page, size int) ([]models.Ship, int64, error) {
+			if keyword != "Voy" || page != 2 || size != 5 {
+				t.Fatalf("unexpected query args: keyword=%q page=%d size=%d", keyword, page, size)
+			}
+			return []models.Ship{{ID: 7, Name: "Voyager", MMSI: "123456789"}}, 1, nil
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.GET("/ships", handler.ListShips)
+
+	req := httptest.NewRequest(http.MethodGet, "/ships?keyword=Voy&page=2&size=5", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	items, ok := body["items"].([]interface{})
+	if !ok || len(items) != 1 || body["total"] != float64(1) {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
 func TestGetShipReturnsNotFoundWhenShipDoesNotExist(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	handler := NewHandler(nil, &fakeAppService{
@@ -522,6 +549,32 @@ func TestGetShipReturnsInternalServerErrorWithoutLeakingStorageError(t *testing.
 	}
 	body := decodeJSONBody(t, recorder)
 	if body["message"] != "failed to get ship" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
+func TestGetShipReturnsShipOnSuccess(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, &fakeAppService{
+		getShipFn: func(ctx context.Context, id uint) (models.Ship, error) {
+			if id != 42 {
+				t.Fatalf("expected id 42, got %d", id)
+			}
+			return models.Ship{ID: 42, Name: "Voyager", MMSI: "123456789"}, nil
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.GET("/ships/:id", handler.GetShip)
+
+	req := httptest.NewRequest(http.MethodGet, "/ships/42", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["id"] != float64(42) || body["name"] != "Voyager" {
 		t.Fatalf("unexpected body: %#v", body)
 	}
 }
@@ -1075,6 +1128,33 @@ func TestUpdateShipReturnsInternalServerErrorWithoutLeakingStorageError(t *testi
 	}
 }
 
+func TestUpdateShipReturnsUpdatedShipOnSuccess(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, &fakeAppService{
+		updateShipFn: func(ctx context.Context, id uint, patch models.Ship) (models.Ship, error) {
+			if id != 42 || patch.Name != "Voyager Updated" || patch.MMSI != "123456789" {
+				t.Fatalf("unexpected update payload: id=%d patch=%#v", id, patch)
+			}
+			return models.Ship{ID: id, Name: patch.Name, MMSI: patch.MMSI, Status: "active"}, nil
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.PUT("/ships/:id", handler.UpdateShip)
+
+	req := httptest.NewRequest(http.MethodPut, "/ships/42", bytes.NewBufferString(`{"name":"Voyager Updated","mmsi":"123456789"}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["id"] != float64(42) || body["name"] != "Voyager Updated" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
 func TestDeleteShipReturnsNotFoundWhenShipDoesNotExist(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	handler := NewHandler(nil, &fakeAppService{
@@ -1118,6 +1198,33 @@ func TestDeleteShipReturnsInternalServerErrorWithoutLeakingStorageError(t *testi
 	body := decodeJSONBody(t, recorder)
 	if body["message"] != "failed to delete ship" {
 		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
+func TestDeleteShipReturnsNoContentOnSuccess(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	deleted := false
+	handler := NewHandler(nil, &fakeAppService{
+		deleteShipFn: func(ctx context.Context, id uint) error {
+			if id != 42 {
+				t.Fatalf("expected id 42, got %d", id)
+			}
+			deleted = true
+			return nil
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.DELETE("/ships/:id", handler.DeleteShip)
+
+	req := httptest.NewRequest(http.MethodDelete, "/ships/42", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d", recorder.Code)
+	}
+	if !deleted {
+		t.Fatal("expected deleteShipFn to be called")
 	}
 }
 
@@ -1367,6 +1474,33 @@ func TestListDispatchEventsReturnsInternalServerErrorWithoutLeakingStorageError(
 	}
 }
 
+func TestListDispatchEventsReturnsItemsOnSuccess(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, &fakeAppService{
+		listDispatchEventsFn: func(ctx context.Context, status string, page, size int) ([]models.DispatchEvent, int64, error) {
+			if status != "NEW" || page != 2 || size != 3 {
+				t.Fatalf("unexpected query args: status=%q page=%d size=%d", status, page, size)
+			}
+			return []models.DispatchEvent{{ID: 1, Title: "Harbor Patrol"}}, 1, nil
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.GET("/dispatch-events", handler.ListDispatchEvents)
+
+	req := httptest.NewRequest(http.MethodGet, "/dispatch-events?status=NEW&page=2&size=3", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	items, ok := body["items"].([]interface{})
+	if !ok || len(items) != 1 || body["total"] != float64(1) {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
 func TestCreateDispatchEventReturnsValidationMessage(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	handler := NewHandler(nil, &fakeAppService{
@@ -1411,6 +1545,40 @@ func TestCreateDispatchEventReturnsInternalServerErrorWithoutLeakingStorageError
 	}
 	body := decodeJSONBody(t, recorder)
 	if body["message"] != "failed to create dispatch event" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
+func TestCreateDispatchEventReturnsCreatedEventOnSuccess(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, &fakeAppService{
+		createDispatchEventFn: func(ctx context.Context, event *models.DispatchEvent) error {
+			if event.Title != "demo" {
+				t.Fatalf("unexpected event payload: %#v", event)
+			}
+			if event.CreatedByID == nil || *event.CreatedByID != 77 {
+				t.Fatalf("expected createdBy 77, got %#v", event.CreatedByID)
+			}
+			event.ID = 11
+			return nil
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.POST("/dispatch-events", func(c *gin.Context) {
+		c.Set(middleware.ClaimsKey, &services.Claims{UserID: 77})
+		handler.CreateDispatchEvent(c)
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/dispatch-events", bytes.NewBufferString(`{"title":"demo"}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["id"] != float64(11) || body["title"] != "demo" {
 		t.Fatalf("unexpected body: %#v", body)
 	}
 }
@@ -1785,6 +1953,39 @@ func TestUpdateDispatchStatusReturnsInternalServerErrorWithoutLeakingStorageErro
 	}
 	body := decodeJSONBody(t, recorder)
 	if body["message"] != "failed to update dispatch status" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
+func TestUpdateDispatchStatusReturnsUpdatedEventOnSuccess(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, &fakeAppService{
+		updateDispatchStatusFn: func(ctx context.Context, id uint, toStatus, remark string, operatorID *uint) (models.DispatchEvent, error) {
+			if id != 9 || toStatus != "PROCESSING" || remark != "front-end remark" {
+				t.Fatalf("unexpected update args: id=%d status=%q remark=%q", id, toStatus, remark)
+			}
+			if operatorID == nil || *operatorID != 77 {
+				t.Fatalf("expected operator 77, got %#v", operatorID)
+			}
+			return models.DispatchEvent{ID: id, Title: "demo", Status: toStatus}, nil
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.PUT("/dispatch-events/:id/status", func(c *gin.Context) {
+		c.Set(middleware.ClaimsKey, &services.Claims{UserID: 77})
+		handler.UpdateDispatchStatus(c)
+	})
+
+	req := httptest.NewRequest(http.MethodPut, "/dispatch-events/9/status", bytes.NewBufferString(`{"status":"PROCESSING","remark":"front-end remark"}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["id"] != float64(9) || body["status"] != "PROCESSING" {
 		t.Fatalf("unexpected body: %#v", body)
 	}
 }
