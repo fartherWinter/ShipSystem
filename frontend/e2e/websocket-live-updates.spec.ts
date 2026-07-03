@@ -96,4 +96,131 @@ test.describe('websocket live updates', () => {
     await expect(page.getByText('ws-battle-01')).toBeVisible();
     await expect(page.getByText('running').first()).toBeVisible();
   });
+
+  test('viewer battle page applies radar projectile and event websocket updates for the active session', async ({ page }) => {
+    await preloadSavedUser(page, 'viewer');
+    await installApiMocks(page, 'viewer');
+
+    await page.goto('/battle');
+
+    await emitMockWsMessage(page, {
+      type: 'battle_state_updated',
+      data: {
+        sessionId: 'ws-battle-02',
+        status: 'running',
+        updatedAt: '2026-07-03T09:25:00Z',
+        units: [
+          {
+            sessionId: 'ws-battle-02',
+            unitId: 'blue-ws-02',
+            shipId: 1,
+            name: 'Blue WS 02',
+            side: 'blue',
+            hp: 96,
+            maxHp: 100,
+            radarRangeKm: 80,
+            weaponRangeKm: 45,
+            cooldownSeconds: 8,
+            longitude: 121.49,
+            latitude: 31.23,
+            course: 45,
+            speedKnots: 24,
+            status: 'active',
+            createdAt: '2026-07-03T09:25:00Z',
+            updatedAt: '2026-07-03T09:25:00Z',
+          },
+          {
+            sessionId: 'ws-battle-02',
+            unitId: 'red-ws-02',
+            shipId: 2,
+            name: 'Red WS 02',
+            side: 'red',
+            hp: 84,
+            maxHp: 100,
+            radarRangeKm: 75,
+            weaponRangeKm: 42,
+            cooldownSeconds: 10,
+            longitude: 121.56,
+            latitude: 31.24,
+            course: 225,
+            speedKnots: 20,
+            status: 'active',
+            createdAt: '2026-07-03T09:25:00Z',
+            updatedAt: '2026-07-03T09:25:00Z',
+          },
+        ],
+        projectiles: [],
+        events: [],
+        radarTargets: [],
+      },
+    });
+
+    const battleStats = page.locator('.battle-stat-grid .ant-statistic-content-value');
+    await expect(battleStats.nth(0)).toContainText('0');
+    await expect(battleStats.nth(1)).toContainText('0');
+
+    await emitMockWsMessage(page, {
+      type: 'radar_scan_updated',
+      data: {
+        sessionId: 'ws-battle-02',
+        radarId: 'blue-radar-02',
+        scanTime: '2026-07-03T09:25:20Z',
+        targets: [
+          {
+            sessionId: 'ws-battle-02',
+            radarId: 'blue-radar-02',
+            targetId: 'red-ws-02',
+            side: 'red',
+            longitude: 121.56,
+            latitude: 31.24,
+            course: 225,
+            speedKnots: 20,
+            confidence: 0.97,
+            detected: true,
+            scanTime: '2026-07-03T09:25:20Z',
+            createdAt: '2026-07-03T09:25:20Z',
+          },
+        ],
+      },
+    });
+    await expect(battleStats.nth(0)).toContainText('1');
+
+    await emitMockWsMessage(page, {
+      type: 'projectile_updated',
+      data: {
+        sessionId: 'ws-battle-02',
+        projectileId: 'ws-proj-02',
+        sourceUnitId: 'blue-ws-02',
+        targetUnitId: 'red-ws-02',
+        side: 'blue',
+        longitude: 121.53,
+        latitude: 31.235,
+        speedKmH: 900,
+        status: 'flying',
+        createdAt: '2026-07-03T09:25:30Z',
+        updatedAt: '2026-07-03T09:25:30Z',
+      },
+    });
+    await expect(battleStats.nth(1)).toContainText('1');
+
+    await emitMockWsMessage(page, {
+      type: 'battle_event_created',
+      data: {
+        id: 9801,
+        sessionId: 'ws-battle-02',
+        eventId: 'ws-event-02',
+        type: 'WEAPON_RELEASE',
+        severity: 'WARN',
+        message: 'WS missile launch confirmed',
+        sourceUnitId: 'blue-ws-02',
+        targetUnitId: 'red-ws-02',
+        longitude: 121.53,
+        latitude: 31.235,
+        occurredAt: '2026-07-03T09:25:40Z',
+        createdAt: '2026-07-03T09:25:40Z',
+      },
+    });
+
+    await expect(page.getByText('WS missile launch confirmed')).toBeVisible();
+  });
 });
