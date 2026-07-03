@@ -15,6 +15,20 @@ test.describe('auth and role routing', () => {
     await expect(shipCountCard).toContainText('1');
   });
 
+  test('viewer dashboard shows aggregated counts and latest alarm details', async ({ page }) => {
+    await preloadSavedUser(page, 'viewer');
+    await installApiMocks(page, 'viewer');
+
+    await page.goto('/dashboard');
+
+    await expect(page.locator('.ant-statistic')).toHaveCount(3);
+    await expect(page.locator('.ant-statistic-content-value').nth(0)).toContainText('1');
+    await expect(page.locator('.ant-statistic-content-value').nth(1)).toContainText('1');
+    await expect(page.locator('.ant-statistic-content-value').nth(2)).toContainText('1');
+    await expect(page.locator('tbody tr').first()).toContainText('SPEEDING');
+    await expect(page.locator('tbody tr').first()).toContainText('Patrol ship exceeded the configured speed corridor.');
+  });
+
   test('viewer is redirected away from rbac page', async ({ page }) => {
     await preloadSavedUser(page, 'viewer');
     await installApiMocks(page, 'viewer');
@@ -52,6 +66,20 @@ test.describe('auth and role routing', () => {
     await updatedRow.locator('button').nth(1).click();
     await page.locator('.ant-popconfirm .ant-btn-primary').click();
     await expect(page.locator('tbody tr', { hasText: 'E2E Patrol 01 Updated' })).toHaveCount(0);
+  });
+
+  test('super admin can open rbac page and inspect user role menu tables', async ({ page }) => {
+    await preloadSavedUser(page, 'super_admin');
+    await installApiMocks(page, 'super_admin');
+
+    await page.goto('/rbac');
+
+    await expect(page).toHaveURL(/\/rbac$/);
+    await expect(page.getByText('demo').first()).toBeVisible();
+    await expect(page.getByText('super_admin').first()).toBeVisible();
+    await expect(page.getByText('viewer').first()).toBeVisible();
+    await expect(page.getByText('Dashboard').first()).toBeVisible();
+    await expect(page.getByText('/dashboard').first()).toBeVisible();
   });
 
   test('logout clears saved user and returns to the login page', async ({ page }) => {

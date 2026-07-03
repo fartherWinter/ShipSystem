@@ -106,6 +106,18 @@ export async function installApiMocks(page: Page, roleCode: RoleCode = 'viewer')
       updatedAt: '2026-07-02T01:00:00Z',
     },
   ];
+  const menus = [
+    {
+      id: 601,
+      name: 'Dashboard',
+      path: '/dashboard',
+      icon: 'LayoutDashboard',
+      parentId: null,
+      sort: 1,
+      createdAt: '2026-07-01T00:00:00Z',
+      updatedAt: '2026-07-01T00:00:00Z',
+    },
+  ];
   const battleScenario = {
     code: 'open-water-duel',
     name: 'Open Water Duel',
@@ -400,7 +412,7 @@ export async function installApiMocks(page: Page, roleCode: RoleCode = 'viewer')
     }
 
     if (path === '/api/v1/rbac/menus' && method === 'GET') {
-      await json(route, 200, { items: [] });
+      await json(route, 200, { items: menus });
       return;
     }
 
