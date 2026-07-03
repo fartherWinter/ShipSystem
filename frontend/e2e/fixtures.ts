@@ -35,6 +35,21 @@ export async function installApiMocks(page: Page, roleCode: RoleCode = 'viewer')
       name: roleName(roleCode),
     },
   };
+  let nextShipID = 102;
+  const ships = [
+    {
+      id: 101,
+      name: '海巡01',
+      mmsi: '123456789',
+      shipType: 'patrol',
+      flag: 'CN',
+      lengthM: 120,
+      widthM: 18,
+      status: 'active',
+      createdAt: '2026-07-01T00:00:00Z',
+      updatedAt: '2026-07-01T00:00:00Z',
+    },
+  ];
 
   await page.route('**/api/v1/**', async (route) => {
     const url = new URL(route.request().url());
@@ -57,20 +72,62 @@ export async function installApiMocks(page: Page, roleCode: RoleCode = 'viewer')
 
     if (path === '/api/v1/ships' && method === 'GET') {
       await json(route, 200, {
-        items: [
-          {
-            id: 101,
-            name: '海巡01',
-            mmsi: '123456789',
-            shipType: 'patrol',
-            flag: 'CN',
-            lengthM: 120,
-            widthM: 18,
-            status: 'active',
-          },
-        ],
-        total: 1,
+        items: ships,
+        total: ships.length,
       });
+      return;
+    }
+
+    if (path === '/api/v1/ships' && method === 'POST') {
+      const payload = route.request().postDataJSON() as Record<string, unknown>;
+      const created = {
+        id: nextShipID++,
+        name: String(payload.name ?? ''),
+        mmsi: String(payload.mmsi ?? ''),
+        shipType: String(payload.shipType ?? ''),
+        flag: String(payload.flag ?? 'CN'),
+        lengthM: Number(payload.lengthM ?? 0),
+        widthM: Number(payload.widthM ?? 0),
+        status: String(payload.status ?? 'active'),
+        createdAt: '2026-07-02T00:00:00Z',
+        updatedAt: '2026-07-02T00:00:00Z',
+      };
+      ships.unshift(created);
+      await json(route, 201, created);
+      return;
+    }
+
+    if (/^\/api\/v1\/ships\/\d+$/.test(path) && method === 'PUT') {
+      const shipID = Number(path.split('/').pop());
+      const payload = route.request().postDataJSON() as Record<string, unknown>;
+      const target = ships.find((item) => item.id === shipID);
+      if (!target) {
+        await json(route, 404, { message: 'ship does not exist' });
+        return;
+      }
+      Object.assign(target, {
+        name: String(payload.name ?? target.name),
+        mmsi: String(payload.mmsi ?? target.mmsi),
+        shipType: String(payload.shipType ?? target.shipType),
+        flag: String(payload.flag ?? target.flag),
+        lengthM: Number(payload.lengthM ?? target.lengthM),
+        widthM: Number(payload.widthM ?? target.widthM),
+        status: String(payload.status ?? target.status),
+        updatedAt: '2026-07-03T00:00:00Z',
+      });
+      await json(route, 200, target);
+      return;
+    }
+
+    if (/^\/api\/v1\/ships\/\d+$/.test(path) && method === 'DELETE') {
+      const shipID = Number(path.split('/').pop());
+      const index = ships.findIndex((item) => item.id === shipID);
+      if (index === -1) {
+        await json(route, 404, { message: 'ship does not exist' });
+        return;
+      }
+      ships.splice(index, 1);
+      await route.fulfill({ status: 204, body: '' });
       return;
     }
 
