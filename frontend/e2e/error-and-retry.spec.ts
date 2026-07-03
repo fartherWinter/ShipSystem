@@ -3,6 +3,24 @@ import { expect, test } from '@playwright/test';
 import { installApiMocks, preloadSavedUser } from './fixtures';
 
 test.describe('error and retry recovery', () => {
+  test('login recovers after the first submit fails', async ({ page }) => {
+    await installApiMocks(page, 'viewer');
+
+    await failOnceAndFallback(page, /\/api\/v1\/auth\/login$/, 'login failed once', 'POST');
+
+    await page.goto('/');
+    await page.locator('input').nth(1).press('Enter');
+
+    const alert = page.locator('.login-alert');
+    await expect(alert).toBeVisible();
+    await expect(alert).toContainText('login failed once');
+
+    await page.locator('.login-panel .ant-btn-primary').click();
+
+    await expect(page).toHaveURL(/\/dashboard$/);
+    await expect(page.getByText('Demo User')).toBeVisible();
+  });
+
   test('dashboard recovers after the first summary request fails', async ({ page }) => {
     await preloadSavedUser(page, 'viewer');
     await installApiMocks(page, 'viewer');
@@ -80,6 +98,25 @@ test.describe('error and retry recovery', () => {
     await expect(page.locator('tbody tr')).toHaveCount(2);
   });
 
+  test('tracks page recovers after the first ship list fetch fails', async ({ page }) => {
+    await preloadSavedUser(page, 'viewer');
+    await installApiMocks(page, 'viewer');
+
+    await failOnceAndFallback(page, /\/api\/v1\/ships\?keyword=.*$/, 'tracks ship list failed once');
+
+    await page.goto('/tracks');
+
+    const alert = page.locator('.ant-alert');
+    await expect(alert).toBeVisible();
+    await expect(alert).toContainText('tracks ship list failed once');
+
+    await alert.locator('.ant-btn').click();
+
+    await expect(alert).toHaveCount(0);
+    await page.locator('.page-toolbar .ant-btn-primary').click();
+    await expect(page.locator('tbody tr')).toHaveCount(2);
+  });
+
   test('monitor simulator start recovers after the first request fails', async ({ page }) => {
     await preloadSavedUser(page, 'viewer');
     await installApiMocks(page, 'viewer');
@@ -105,6 +142,34 @@ test.describe('error and retry recovery', () => {
 
     await expect(alert).toHaveCount(0);
     await expect(startButton).not.toHaveClass(/ant-btn-loading/);
+  });
+
+  test('battle live tab recovers after the first refresh fails', async ({ page }) => {
+    await preloadSavedUser(page, 'dispatcher');
+    await installApiMocks(page, 'dispatcher');
+
+    await failOnceAndFallback(
+      page,
+      /\/api\/v1\/battle\/sessions\/session-live-302\/state$/,
+      'battle state refresh failed once',
+    );
+
+    await page.goto('/battle');
+
+    const startButton = page.locator('.battle-side-panel .ant-btn-primary').first();
+    await startButton.click();
+    await expect(page.getByText('session-live-302')).toBeVisible();
+
+    const refreshButton = page.locator('.battle-side-panel button:has(svg.lucide-refresh-cw)').first();
+    await refreshButton.click();
+
+    const alert = page.locator('.battle-side-panel .ant-alert').first();
+    await expect(alert).toBeVisible();
+    await expect(alert).toContainText('battle state refresh failed once');
+
+    await refreshButton.click();
+
+    await expect(alert).toHaveCount(0);
   });
 
   test('battle live tab recovers after the first scenario fetch fails', async ({ page }) => {
