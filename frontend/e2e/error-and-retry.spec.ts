@@ -148,6 +148,43 @@ test.describe('error and retry recovery', () => {
     await expect(page.getByText('Blue radar contact established').first()).toBeVisible();
     await expect(page.getByRole('slider')).toHaveAttribute('aria-valuemax', '2');
   });
+
+  test('alarms page recovers after the first list fetch fails', async ({ page }) => {
+    await preloadSavedUser(page, 'viewer');
+    await installApiMocks(page, 'viewer');
+
+    await failOnceAndFallback(page, /\/api\/v1\/alarms\?status=.*$/, 'alarms list failed once');
+
+    await page.goto('/alarms');
+
+    const alert = page.locator('.ant-alert');
+    await expect(alert).toBeVisible();
+    await expect(alert).toContainText('alarms list failed once');
+
+    await alert.locator('.ant-btn').click();
+
+    await expect(alert).toHaveCount(0);
+    await expect(page.locator('tbody tr', { hasText: 'Speed breach alert' })).toBeVisible();
+  });
+
+  test('rbac page recovers after the first users fetch fails', async ({ page }) => {
+    await preloadSavedUser(page, 'super_admin');
+    await installApiMocks(page, 'super_admin');
+
+    await failOnceAndFallback(page, /\/api\/v1\/rbac\/users$/, 'rbac users failed once');
+
+    await page.goto('/rbac');
+
+    const alert = page.locator('.ant-alert');
+    await expect(alert).toBeVisible();
+    await expect(alert).toContainText('rbac users failed once');
+
+    await alert.locator('.ant-btn').click();
+
+    await expect(alert).toHaveCount(0);
+    await expect(page.getByText('demo').first()).toBeVisible();
+    await expect(page.getByText('Dashboard').first()).toBeVisible();
+  });
 });
 
 async function failOnceAndFallback(page: Page, pattern: RegExp, message: string, method = 'GET'): Promise<void> {
