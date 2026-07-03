@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 import { expect, test } from '@playwright/test';
 import { installApiMocks, preloadSavedUser } from './fixtures';
 
@@ -42,5 +43,50 @@ test.describe('dispatch and battle replay flows', () => {
     await page.locator('button:has(svg.lucide-chevron-right)').click();
     await expect(slider).toHaveAttribute('aria-valuenow', '1');
     await expect(page.getByText('Blue escort launched missile volley').first()).toBeVisible();
+  });
+
+  test('battle replay can export report downloads in json csv and html', async ({ page }, testInfo) => {
+    await preloadSavedUser(page, 'viewer');
+    await installApiMocks(page, 'viewer');
+
+    await page.goto('/battle');
+    await page.locator('.ant-tabs-tab').nth(1).click();
+
+    const sessionButton = page.getByRole('button', { name: /Replay Session Alpha/i });
+    await expect(sessionButton).toBeVisible();
+    await sessionButton.click();
+    await expect(page.getByRole('button', { name: /JSON/i })).toBeVisible();
+
+    const cases = [
+      {
+        trigger: /JSON/i,
+        filename: 'battle-session-alpha-report.json',
+        expectedSnippet: '"sessionId": "session-alpha"',
+      },
+      {
+        trigger: /CSV/i,
+        filename: 'battle-session-alpha-report.csv',
+        expectedSnippet: 'summary,session_id,session-alpha',
+      },
+      {
+        trigger: /HTML/i,
+        filename: 'battle-session-alpha-report.html',
+        expectedSnippet: '<!doctype html>',
+      },
+    ] as const;
+
+    for (const item of cases) {
+      const [download] = await Promise.all([
+        page.waitForEvent('download'),
+        page.getByRole('button', { name: item.trigger }).click(),
+      ]);
+
+      expect(download.suggestedFilename()).toBe(item.filename);
+
+      const outputPath = testInfo.outputPath(item.filename);
+      await download.saveAs(outputPath);
+      const text = await readFile(outputPath, 'utf8');
+      expect(text).toContain(item.expectedSnippet);
+    }
   });
 });
