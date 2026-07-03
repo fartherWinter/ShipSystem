@@ -1,7 +1,7 @@
 import { Alert, Button, Card, Empty, List, Progress, Select, Slider, Space, Statistic, Tabs, Tag, Typography, message } from 'antd';
 import { ChevronLeft, ChevronRight, Pause, Play, Radar, RefreshCw, Shield, Target } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { api, startBattleSimulator, stopBattleSimulator } from '../api/client';
+import { api, listAllBattleSessions, startBattleSimulator, stopBattleSimulator } from '../api/client';
 import MonitorMap from '../components/MonitorMap';
 import type { BattleReport, BattleScenario, BattleSession, BattleSnapshot, BattleState, BattleTimelineItem, BattleUnit } from '../types';
 import { battleReportDownloadFilename, buildBattleReportExport } from '../utils/battleReportExport';
@@ -58,8 +58,8 @@ export default function BattlePage({ state, onStateChange }: Props) {
     setLoading(true);
     setStateError('');
     try {
-      const sessions = await api.battleSessions({ page: 1, size: 100 });
-      const runningSession = sessions.items.find((item) => item.status === 'running');
+      const sessions = await listAllBattleSessions();
+      const runningSession = sessions.find((item) => item.status === 'running');
       if (!runningSession) {
         return;
       }
@@ -299,10 +299,10 @@ function BattleReplayPanel() {
     setLoading(true);
     setSessionsError('');
     try {
-      const res = await api.battleSessions({ page: 1, size: 100 });
-      setSessions(res.items);
-      if (!selectedSessionId && res.items[0]) {
-        await loadSession(res.items[0].sessionId);
+      const items = await listAllBattleSessions();
+      setSessions(items);
+      if (!selectedSessionId && items[0]) {
+        await loadSession(items[0].sessionId);
       }
     } catch (err) {
       const text = err instanceof Error ? err.message : '加载历史对战失败';

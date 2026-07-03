@@ -4,6 +4,7 @@ import type {
   AnalyticsProxyResponse,
   BattleReport,
   BattleScenarioListResponse,
+  BattleSession,
   BattleSessionCreateRequest,
   BattleSessionCreateResponse,
   BattleSessionPageResult,
@@ -55,6 +56,11 @@ type TrackQuery = {
 type PaginationQuery = {
   page?: number;
   size?: number;
+};
+
+type PageResult<T> = {
+  items: T[];
+  total: number;
 };
 
 function appendPagination(params: URLSearchParams, pagination?: PaginationQuery) {
@@ -157,13 +163,25 @@ export async function getSimulatorStatus() {
 }
 
 export async function listAllShips(keyword = '') {
+  return collectAllPages<Ship>((page, size) => api.ships(keyword, { page, size }));
+}
+
+export async function listAllDispatchEvents(status = '') {
+  return collectAllPages<DispatchEvent>((page, size) => api.dispatchEvents(status, { page, size }));
+}
+
+export async function listAllBattleSessions() {
+  return collectAllPages<BattleSession>((page, size) => api.battleSessions({ page, size }));
+}
+
+async function collectAllPages<T>(loadPage: (page: number, size: number) => Promise<PageResult<T>>) {
   const size = 100;
   let page = 1;
   let total = 0;
-  const items: Ship[] = [];
+  const items: T[] = [];
 
   do {
-    const data = await api.ships(keyword, { page, size });
+    const data = await loadPage(page, size);
     items.push(...data.items);
     total = data.total;
     if (data.items.length === 0) {
