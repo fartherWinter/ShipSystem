@@ -1,4 +1,4 @@
-import { Alert, Button, Card, List, Select, Space, Tag, Typography, message } from 'antd';
+import { Alert, Button, Card, List, Select, Space, Statistic, Tag, Typography, message } from 'antd';
 import { Play, Radio, RefreshCw, Square } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { getSimulatorStatus, listAllShips, startSimulator, stopSimulator } from '../api/client';
@@ -10,7 +10,47 @@ type Props = {
   wsStatus: string;
 };
 
-function formatDateTime(value: string) {
+type DeliveryMetrics = {
+  successCount: number;
+  failureCount: number;
+  retryCount: number;
+  droppedCount: number;
+  lastSuccessAt: string | null;
+  lastFailureAt: string | null;
+  lastError: string;
+};
+
+type BattleSessionSummary = {
+  runningCount: number;
+  totalCount: number;
+};
+
+const emptyDeliveryMetrics: DeliveryMetrics = {
+  successCount: 0,
+  failureCount: 0,
+  retryCount: 0,
+  droppedCount: 0,
+  lastSuccessAt: null,
+  lastFailureAt: null,
+  lastError: '',
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function readNumber(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+}
+
+function readString(value: unknown) {
+  return typeof value === 'string' ? value : '';
+}
+
+function formatDateTime(value?: string | null) {
+  if (!value) {
+    return '-';
+  }
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) {
     return value;
@@ -37,6 +77,42 @@ function readRequestId(payload: AnalyticsProxyResponse) {
   return typeof payload.requestId === 'string' ? payload.requestId.trim() : '';
 }
 
+function readDeliveryMetrics(payload: AnalyticsProxyResponse): DeliveryMetrics {
+  if (!isRecord(payload.delivery)) {
+    return emptyDeliveryMetrics;
+  }
+  return {
+    successCount: readNumber(payload.delivery.successCount),
+    failureCount: readNumber(payload.delivery.failureCount),
+    retryCount: readNumber(payload.delivery.retryCount),
+    droppedCount: readNumber(payload.delivery.droppedCount),
+    lastSuccessAt: readString(payload.delivery.lastSuccessAt) || null,
+    lastFailureAt: readString(payload.delivery.lastFailureAt) || null,
+    lastError: readString(payload.delivery.lastError),
+  };
+}
+
+function readBattleSessionSummary(payload: AnalyticsProxyResponse): BattleSessionSummary {
+  if (!isRecord(payload.battleSessions)) {
+    return { runningCount: 0, totalCount: 0 };
+  }
+
+  let runningCount = 0;
+  let totalCount = 0;
+
+  Object.values(payload.battleSessions).forEach((item) => {
+    if (!isRecord(item)) {
+      return;
+    }
+    totalCount += 1;
+    if (item.running === true) {
+      runningCount += 1;
+    }
+  });
+
+  return { runningCount, totalCount };
+}
+
 export default function MonitorPage({ locations, wsStatus }: Props) {
   const [ships, setShips] = useState<Ship[]>([]);
   const [selectedShipIds, setSelectedShipIds] = useState<number[]>([]);
@@ -46,6 +122,9 @@ export default function MonitorPage({ locations, wsStatus }: Props) {
   const [statusLoading, setStatusLoading] = useState(false);
   const [statusError, setStatusError] = useState('');
   const [statusNote, setStatusNote] = useState('');
+  const [statusUpdatedAt, setStatusUpdatedAt] = useState('');
+  const [deliveryMetrics, setDeliveryMetrics] = useState<DeliveryMetrics>(emptyDeliveryMetrics);
+  const [battleSessionSummary, setBattleSessionSummary] = useState<BattleSessionSummary>({ runningCount: 0, totalCount: 0 });
   const [starting, setStarting] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [startError, setStartError] = useState('');
@@ -65,6 +144,16 @@ export default function MonitorPage({ locations, wsStatus }: Props) {
   useEffect(() => {
     void refreshMonitorState();
   }, []);
+
+  useEffect(() => {
+    if (!simulatorRunning && battleSessionSummary.runningCount === 0) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      void loadSimulatorStatus();
+    }, 10000);
+    return () => window.clearInterval(timer);
+  }, [simulatorRunning, battleSessionSummary.runningCount]);
 
   async function loadShips() {
     setShipsLoading(true);
@@ -91,6 +180,9 @@ export default function MonitorPage({ locations, wsStatus }: Props) {
     try {
       const data = await getSimulatorStatus();
       setSimulatorRunning(readRunningFlag(data));
+      setDeliveryMetrics(readDeliveryMetrics(data));
+      setBattleSessionSummary(readBattleSessionSummary(data));
+      setStatusUpdatedAt(new Date().toISOString());
     } catch (err) {
       const text = err instanceof Error ? err.message : '加载模拟器状态失败';
       setStatusError(text);
@@ -119,7 +211,11 @@ export default function MonitorPage({ locations, wsStatus }: Props) {
       const serverMessage = readResponseMessage(data);
       const requestId = readRequestId(data);
       setSimulatorRunning(readRunningFlag(data));
-      setStatusNote(requestId ? `${serverMessage || '模拟器状态已更新'}（请求 ID：${requestId}）` : serverMessage || `本次选择 ${selectedShipIds.length} 艘船舶启动模拟`);
+      setStatusNote(
+        requestId
+          ? `${serverMessage || '模拟器状态已更新'}（请求 ID：${requestId}）`
+          : serverMessage || `本次选择 ${selectedShipIds.length} 艘船舶启动模拟`,
+      );
       if (serverMessage) {
         message.info(serverMessage);
       } else {
@@ -158,6 +254,7 @@ export default function MonitorPage({ locations, wsStatus }: Props) {
   const simulatorStatusLabel = statusLoading ? '检查中' : simulatorRunning ? '运行中' : '未运行';
   const simulatorStatusColor = statusLoading ? 'processing' : simulatorRunning ? 'green' : 'default';
   const wsStatusColor = wsStatus === 'connected' ? 'green' : wsStatus === 'connecting' ? 'processing' : 'red';
+  const deliveryHealthColor = deliveryMetrics.failureCount > 0 || deliveryMetrics.droppedCount > 0 ? 'orange' : 'green';
 
   return (
     <div className="monitor-layout">
@@ -176,6 +273,12 @@ export default function MonitorPage({ locations, wsStatus }: Props) {
               <Space>
                 <Typography.Text>模拟器</Typography.Text>
                 <Tag color={simulatorStatusColor}>{simulatorStatusLabel}</Tag>
+              </Space>
+              <Space>
+                <Typography.Text>对战任务</Typography.Text>
+                <Tag color={battleSessionSummary.runningCount > 0 ? 'gold' : 'default'}>
+                  {battleSessionSummary.runningCount > 0 ? `${battleSessionSummary.runningCount} 个运行中` : '当前无运行中任务'}
+                </Tag>
               </Space>
             </Space>
           </Card>
@@ -223,6 +326,30 @@ export default function MonitorPage({ locations, wsStatus }: Props) {
 
               <Typography.Text type="secondary">当前可选船舶 {ships.length} 艘</Typography.Text>
               {statusNote && <Typography.Text type="secondary">{statusNote}</Typography.Text>}
+            </Space>
+          </Card>
+
+          <Card title="投递状态" extra={<Tag color={deliveryHealthColor}>{deliveryMetrics.failureCount > 0 || deliveryMetrics.droppedCount > 0 ? '需关注' : '正常'}</Tag>}>
+            <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                  gap: 12,
+                }}
+              >
+                <Statistic title="成功投递" value={deliveryMetrics.successCount} />
+                <Statistic title="失败次数" value={deliveryMetrics.failureCount} />
+                <Statistic title="重试次数" value={deliveryMetrics.retryCount} />
+                <Statistic title="丢弃次数" value={deliveryMetrics.droppedCount} />
+              </div>
+              <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                <Typography.Text type="secondary">最近成功：{formatDateTime(deliveryMetrics.lastSuccessAt)}</Typography.Text>
+                <Typography.Text type="secondary">最近失败：{formatDateTime(deliveryMetrics.lastFailureAt)}</Typography.Text>
+                <Typography.Text type="secondary">状态刷新：{formatDateTime(statusUpdatedAt)}</Typography.Text>
+                <Typography.Text type="secondary">已登记对战会话：{battleSessionSummary.totalCount}</Typography.Text>
+                <Typography.Text type="secondary">最近错误：{deliveryMetrics.lastError || '无'}</Typography.Text>
+              </Space>
             </Space>
           </Card>
 
