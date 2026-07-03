@@ -602,6 +602,33 @@ func TestListBattleSessionsReturnsInternalServerErrorWithoutLeakingStorageError(
 	}
 }
 
+func TestListBattleSessionsReturnsItemsOnSuccess(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, &fakeAppService{
+		listBattleSessionsFn: func(ctx context.Context, page, size int) ([]models.BattleSession, int64, error) {
+			if page != 2 || size != 4 {
+				t.Fatalf("unexpected pagination args: page=%d size=%d", page, size)
+			}
+			return []models.BattleSession{{ID: 1, SessionID: "session-1", Status: "running"}}, 1, nil
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.GET("/battle/sessions", handler.ListBattleSessions)
+
+	req := httptest.NewRequest(http.MethodGet, "/battle/sessions?page=2&size=4", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	items, ok := body["items"].([]interface{})
+	if !ok || len(items) != 1 || body["total"] != float64(1) {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
 func TestListUsersReturnsInternalServerErrorWithoutLeakingStorageError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	handler := NewHandler(nil, &fakeAppService{
@@ -1358,6 +1385,35 @@ func TestAckAlarmReturnsInternalServerErrorWithoutLeakingStorageError(t *testing
 	}
 }
 
+func TestAckAlarmReturnsAlarmOnSuccess(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, &fakeAppService{
+		ackAlarmFn: func(ctx context.Context, id, userID uint) (models.Alarm, error) {
+			if id != 9 || userID != 77 {
+				t.Fatalf("unexpected ack args: id=%d userID=%d", id, userID)
+			}
+			return models.Alarm{ID: id, Status: "ACKED"}, nil
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.PUT("/alarms/:id/ack", func(c *gin.Context) {
+		c.Set(middleware.ClaimsKey, &services.Claims{UserID: 77})
+		handler.AckAlarm(c)
+	})
+
+	req := httptest.NewRequest(http.MethodPut, "/alarms/9/ack", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["id"] != float64(9) || body["status"] != "ACKED" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
 func TestListAlarmsReturnsValidationMessage(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	handler := NewHandler(nil, &fakeAppService{
@@ -1400,6 +1456,33 @@ func TestListAlarmsReturnsInternalServerErrorWithoutLeakingStorageError(t *testi
 	}
 	body := decodeJSONBody(t, recorder)
 	if body["message"] != "failed to list alarms" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
+func TestListAlarmsReturnsItemsOnSuccess(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, &fakeAppService{
+		listAlarmsFn: func(ctx context.Context, status string, page, size int) ([]models.Alarm, int64, error) {
+			if status != "OPEN" || page != 2 || size != 4 {
+				t.Fatalf("unexpected query args: status=%q page=%d size=%d", status, page, size)
+			}
+			return []models.Alarm{{ID: 1, Title: "Speed breach", Status: "OPEN"}}, 1, nil
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.GET("/alarms", handler.ListAlarms)
+
+	req := httptest.NewRequest(http.MethodGet, "/alarms?status=OPEN&page=2&size=4", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	items, ok := body["items"].([]interface{})
+	if !ok || len(items) != 1 || body["total"] != float64(1) {
 		t.Fatalf("unexpected body: %#v", body)
 	}
 }
@@ -1629,6 +1712,43 @@ func TestGetBattleTimelineReturnsInternalServerErrorWithoutLeakingStorageError(t
 	}
 }
 
+func TestGetBattleTimelineReturnsItemsOnSuccess(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	snapshotTime := time.Date(2026, 7, 3, 9, 0, 0, 0, time.UTC)
+	handler := NewHandler(nil, &fakeAppService{
+		listBattleTimelineFn: func(ctx context.Context, sessionID string) ([]services.BattleTimelineItem, error) {
+			if sessionID != "session-1" {
+				t.Fatalf("expected session-1, got %q", sessionID)
+			}
+			return []services.BattleTimelineItem{{
+				Tick:         1,
+				SnapshotTime: snapshotTime,
+				EventCount:   1,
+				Events: []services.BattleTimelineEventSummary{{
+					Type:     "RADAR_CONTACT",
+					Severity: "INFO",
+					Message:  "target found",
+				}},
+			}}, nil
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.GET("/battle/sessions/:sessionId/timeline", handler.GetBattleTimeline)
+
+	req := httptest.NewRequest(http.MethodGet, "/battle/sessions/session-1/timeline", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	items, ok := body["items"].([]interface{})
+	if !ok || len(items) != 1 {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
 func TestCreateBattleSessionReturnsValidationMessage(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	handler := NewHandler(nil, &fakeAppService{
@@ -1677,6 +1797,43 @@ func TestCreateBattleSessionReturnsInternalServerErrorWithoutLeakingStorageError
 	}
 }
 
+func TestCreateBattleSessionAcceptsEmptyBodyAndReturnsSessionAndStateOnSuccess(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	updatedAt := time.Date(2026, 7, 3, 9, 10, 0, 0, time.UTC)
+	handler := NewHandler(nil, &fakeAppService{
+		createBattleSessionFn: func(ctx context.Context, scenarioCode string) (models.BattleSession, services.BattleStateSnapshot, error) {
+			if scenarioCode != "" {
+				t.Fatalf("expected empty scenarioCode for empty body, got %q", scenarioCode)
+			}
+			return models.BattleSession{ID: 1, SessionID: "session-1", Status: "running"}, services.BattleStateSnapshot{
+				SessionID: "session-1",
+				Status:    "running",
+				UpdatedAt: updatedAt,
+			}, nil
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.POST("/battle/sessions", handler.CreateBattleSession)
+
+	req := httptest.NewRequest(http.MethodPost, "/battle/sessions", http.NoBody)
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	session, ok := body["session"].(map[string]interface{})
+	if !ok || session["sessionId"] != "session-1" {
+		t.Fatalf("unexpected session body: %#v", body["session"])
+	}
+	state, ok := body["state"].(map[string]interface{})
+	if !ok || state["status"] != "running" {
+		t.Fatalf("unexpected state body: %#v", body["state"])
+	}
+}
+
 func TestGetBattleStateReturnsNotFoundWhenSessionDoesNotExist(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	handler := NewHandler(nil, &fakeAppService{
@@ -1719,6 +1876,33 @@ func TestGetBattleStateReturnsInternalServerErrorWithoutLeakingStorageError(t *t
 	}
 	body := decodeJSONBody(t, recorder)
 	if body["message"] != "failed to load battle state" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
+func TestGetBattleStateReturnsSnapshotOnSuccess(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	updatedAt := time.Date(2026, 7, 3, 9, 20, 0, 0, time.UTC)
+	handler := NewHandler(nil, &fakeAppService{
+		getBattleStateFn: func(ctx context.Context, sessionID string) (services.BattleStateSnapshot, error) {
+			if sessionID != "session-1" {
+				t.Fatalf("expected session-1, got %q", sessionID)
+			}
+			return services.BattleStateSnapshot{SessionID: sessionID, Status: "running", UpdatedAt: updatedAt}, nil
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.GET("/battle/sessions/:sessionId/state", handler.GetBattleState)
+
+	req := httptest.NewRequest(http.MethodGet, "/battle/sessions/session-1/state", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["sessionId"] != "session-1" || body["status"] != "running" {
 		t.Fatalf("unexpected body: %#v", body)
 	}
 }
@@ -1769,6 +1953,37 @@ func TestListBattleSnapshotsReturnsInternalServerErrorWithoutLeakingStorageError
 	}
 }
 
+func TestListBattleSnapshotsReturnsItemsOnSuccess(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	snapshotTime := time.Date(2026, 7, 3, 9, 30, 0, 0, time.UTC)
+	handler := NewHandler(nil, &fakeAppService{
+		listBattleSnapshotsFn: func(ctx context.Context, sessionID string, fromTick, toTick *int64) ([]services.BattleSnapshotView, error) {
+			if sessionID != "session-1" {
+				t.Fatalf("expected session-1, got %q", sessionID)
+			}
+			if fromTick == nil || *fromTick != 1 || toTick == nil || *toTick != 3 {
+				t.Fatalf("unexpected tick filters: from=%v to=%v", fromTick, toTick)
+			}
+			return []services.BattleSnapshotView{{ID: 1, SessionID: sessionID, Tick: 2, SnapshotTime: snapshotTime}}, nil
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.GET("/battle/sessions/:sessionId/snapshots", handler.ListBattleSnapshots)
+
+	req := httptest.NewRequest(http.MethodGet, "/battle/sessions/session-1/snapshots?from=1&to=3", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	items, ok := body["items"].([]interface{})
+	if !ok || len(items) != 1 {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
 func TestGetBattleReportReturnsNotFoundWhenSessionDoesNotExist(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	handler := NewHandler(nil, &fakeAppService{
@@ -1815,6 +2030,35 @@ func TestGetBattleReportReturnsInternalServerErrorWithoutLeakingStorageError(t *
 	}
 }
 
+func TestGetBattleReportReturnsReportOnSuccess(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, &fakeAppService{
+		getBattleReportFn: func(ctx context.Context, sessionID string) (services.BattleReport, error) {
+			if sessionID != "session-1" {
+				t.Fatalf("expected session-1, got %q", sessionID)
+			}
+			return services.BattleReport{
+				Session: models.BattleSession{SessionID: sessionID},
+				Winner:  "blue",
+			}, nil
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.GET("/battle/sessions/:sessionId/report", handler.GetBattleReport)
+
+	req := httptest.NewRequest(http.MethodGet, "/battle/sessions/session-1/report", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["winner"] != "blue" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
 func TestStopBattleSessionReturnsNotFoundWhenSessionDoesNotExist(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	handler := NewHandler(nil, &fakeAppService{
@@ -1857,6 +2101,32 @@ func TestStopBattleSessionReturnsInternalServerErrorWithoutLeakingStorageError(t
 	}
 	body := decodeJSONBody(t, recorder)
 	if body["message"] != "failed to stop battle session" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
+func TestStopBattleSessionReturnsStateOnSuccess(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, &fakeAppService{
+		stopBattleSessionFn: func(ctx context.Context, sessionID string) (services.BattleStateSnapshot, error) {
+			if sessionID != "session-1" {
+				t.Fatalf("expected session-1, got %q", sessionID)
+			}
+			return services.BattleStateSnapshot{SessionID: sessionID, Status: "stopped"}, nil
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.POST("/battle/sessions/:sessionId/stop", handler.StopBattleSession)
+
+	req := httptest.NewRequest(http.MethodPost, "/battle/sessions/session-1/stop", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["sessionId"] != "session-1" || body["status"] != "stopped" {
 		t.Fatalf("unexpected body: %#v", body)
 	}
 }
@@ -1929,6 +2199,33 @@ func TestReceiveRadarReportReturnsInternalServerErrorWithoutLeakingStorageError(
 	}
 	body := decodeJSONBody(t, recorder)
 	if body["message"] != "failed to receive radar report" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
+func TestReceiveRadarReportReturnsAcceptedStateOnSuccess(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, &fakeAppService{
+		receiveRadarReportFn: func(ctx context.Context, report services.RadarReportPayload) (services.BattleStateSnapshot, error) {
+			if report.SessionID != "battle-1" || report.RadarID != "radar-1" || len(report.Targets) != 1 {
+				t.Fatalf("unexpected report payload: %#v", report)
+			}
+			return services.BattleStateSnapshot{SessionID: report.SessionID, Status: "running"}, nil
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.POST("/radar/reports", handler.ReceiveRadarReport)
+
+	req := httptest.NewRequest(http.MethodPost, "/radar/reports", bytes.NewBufferString(`{"sessionId":"battle-1","radarId":"radar-1","targets":[{"targetId":"red-1","side":"red","longitude":120.1,"latitude":30.2,"course":45,"speedKnots":20,"confidence":0.9,"detected":true}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["sessionId"] != "battle-1" || body["status"] != "running" {
 		t.Fatalf("unexpected body: %#v", body)
 	}
 }
@@ -2074,6 +2371,26 @@ func TestStartSimulationReturnsValidationMessage(t *testing.T) {
 	}
 }
 
+func TestStartSimulationReturnsBadRequestForInvalidJSON(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, nil, &fakeAnalyticsService{}, nil, 0, false, nil)
+	router := gin.New()
+	router.POST("/analytics/simulate/start", handler.StartSimulation)
+
+	req := httptest.NewRequest(http.MethodPost, "/analytics/simulate/start", bytes.NewBufferString(`{"shipIds":[1]`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["message"] != "simulation request is invalid" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
 func TestStartSimulationReturnsStructuredUpstreamError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	handler := NewHandler(nil, nil, &fakeAnalyticsService{
@@ -2211,6 +2528,26 @@ func TestStartBattleSimulationReturnsValidationMessage(t *testing.T) {
 	}
 }
 
+func TestStartBattleSimulationReturnsBadRequestForInvalidJSON(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, nil, &fakeAnalyticsService{}, nil, 0, false, nil)
+	router := gin.New()
+	router.POST("/analytics/simulate/battle/start", handler.StartBattleSimulation)
+
+	req := httptest.NewRequest(http.MethodPost, "/analytics/simulate/battle/start", bytes.NewBufferString(`{"sessionId":"battle-1"`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["message"] != "battle simulation request is invalid" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
 func TestStartBattleSimulationReturnsStructuredUpstreamError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	handler := NewHandler(nil, nil, &fakeAnalyticsService{
@@ -2296,6 +2633,26 @@ func TestStopBattleSimulationReturnsValidationMessage(t *testing.T) {
 	}
 	body := decodeJSONBody(t, recorder)
 	if body["message"] != "sessionId is required" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
+func TestStopBattleSimulationReturnsBadRequestForInvalidJSON(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, nil, &fakeAnalyticsService{}, nil, 0, false, nil)
+	router := gin.New()
+	router.POST("/analytics/simulate/battle/stop", handler.StopBattleSimulation)
+
+	req := httptest.NewRequest(http.MethodPost, "/analytics/simulate/battle/stop", bytes.NewBufferString(`{"sessionId":"battle-1"`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["message"] != "battle simulation stop request is invalid" {
 		t.Fatalf("unexpected body: %#v", body)
 	}
 }
