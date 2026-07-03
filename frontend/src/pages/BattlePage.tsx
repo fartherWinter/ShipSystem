@@ -1,4 +1,4 @@
-import { Alert, Button, Card, Empty, List, Progress, Select, Slider, Space, Statistic, Tabs, Tag, Typography, message } from 'antd';
+import { Alert, Button, Card, Empty, Input, List, Progress, Select, Slider, Space, Statistic, Tabs, Tag, Typography, message } from 'antd';
 import { ChevronLeft, ChevronRight, Pause, Play, Radar, RefreshCw, Shield, Target } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { api, listAllBattleSessions, startBattleSimulator, stopBattleSimulator } from '../api/client';
@@ -306,6 +306,8 @@ function LiveBattlePanel({
 function BattleReplayPanel() {
   const [sessions, setSessions] = useState<BattleSession[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState('');
+  const [sessionKeyword, setSessionKeyword] = useState('');
+  const [sessionStatusFilter, setSessionStatusFilter] = useState('');
   const [timeline, setTimeline] = useState<BattleTimelineItem[]>([]);
   const [snapshots, setSnapshots] = useState<BattleSnapshot[]>([]);
   const [report, setReport] = useState<BattleReport | null>(null);
@@ -318,6 +320,21 @@ function BattleReplayPanel() {
 
   const current = snapshots[index];
   const tickIndexMap = useMemo(() => new Map(snapshots.map((item, itemIndex) => [item.tick, itemIndex])), [snapshots]);
+  const filteredSessions = useMemo(() => {
+    const keyword = sessionKeyword.trim().toLowerCase();
+    return [...sessions]
+      .sort((left, right) => compareBattleSessions(left, right))
+      .filter((item) => {
+        if (sessionStatusFilter && item.status !== sessionStatusFilter) {
+          return false;
+        }
+        if (!keyword) {
+          return true;
+        }
+        const haystack = [item.name, item.sessionId, item.scenarioCode, item.status].join(' ').toLowerCase();
+        return haystack.includes(keyword);
+      });
+  }, [sessionKeyword, sessionStatusFilter, sessions]);
 
   useEffect(() => {
     refreshSessions();
@@ -343,8 +360,9 @@ function BattleReplayPanel() {
     try {
       const items = await listAllBattleSessions();
       setSessions(items);
-      if (!selectedSessionId && items[0]) {
-        await loadSession(items[0].sessionId);
+      const sortedItems = [...items].sort((left, right) => compareBattleSessions(left, right));
+      if (!selectedSessionId && sortedItems[0]) {
+        await loadSession(sortedItems[0].sessionId);
       }
     } catch (err) {
       const text = err instanceof Error ? err.message : '加载历史对战失败';
@@ -431,6 +449,30 @@ function BattleReplayPanel() {
             title="历史对战"
             extra={<Button icon={<RefreshCw size={16} />} loading={loading} onClick={refreshSessions} />}
           >
+            <Space wrap style={{ marginBottom: 12 }}>
+              <Input.Search
+                allowClear
+                value={sessionKeyword}
+                placeholder="搜索会话名、场景或 Session ID"
+                style={{ width: 240 }}
+                onChange={(event) => setSessionKeyword(event.target.value)}
+                onSearch={(value) => setSessionKeyword(value)}
+              />
+              <Select
+                allowClear
+                value={sessionStatusFilter || undefined}
+                placeholder="筛选状态"
+                style={{ width: 160 }}
+                options={[
+                  { label: '运行中', value: 'running' },
+                  { label: '蓝方胜利', value: 'blue_victory' },
+                  { label: '红方胜利', value: 'red_victory' },
+                  { label: '已停止', value: 'stopped' },
+                ]}
+                onChange={(value) => setSessionStatusFilter(value ?? '')}
+              />
+              <Typography.Text type="secondary">显示 {filteredSessions.length} / {sessions.length} 场</Typography.Text>
+            </Space>
             {sessionsError && (
               <Alert
                 type="error"
@@ -443,7 +485,7 @@ function BattleReplayPanel() {
             )}
             <List
               size="small"
-              dataSource={sessions}
+              dataSource={filteredSessions}
               locale={{ emptyText: sessionsError ? '历史对战加载失败，请重试' : '暂无历史对战' }}
               renderItem={(item) => (
                 <List.Item>
@@ -453,7 +495,10 @@ function BattleReplayPanel() {
                     onClick={() => loadSession(item.sessionId)}
                   >
                     <span className="battle-session-button">
-                      <span>{item.name}</span>
+                      <span>
+                        <Typography.Text>{item.name}</Typography.Text>
+                        <Typography.Text type="secondary">{item.scenarioCode} / {formatTime(item.startedAt)}</Typography.Text>
+                      </span>
                       <Tag color={statusColor(item.status)}>{item.status}</Tag>
                     </span>
                   </Button>
@@ -654,6 +699,17 @@ function EventCard({ title, events }: { title: string; events: BattleState['even
       />
     </Card>
   );
+}
+
+function compareBattleSessions(left: BattleSession, right: BattleSession) {
+  if (left.status === 'running' && right.status !== 'running') return -1;
+  if (left.status !== 'running' && right.status === 'running') return 1;
+  const leftTime = Date.parse(left.startedAt || left.createdAt);
+  const rightTime = Date.parse(right.startedAt || right.createdAt);
+  if (Number.isNaN(leftTime) && Number.isNaN(rightTime)) return left.sessionId.localeCompare(right.sessionId);
+  if (Number.isNaN(leftTime)) return 1;
+  if (Number.isNaN(rightTime)) return -1;
+  return rightTime - leftTime;
 }
 
 function statusColor(status?: string) {
