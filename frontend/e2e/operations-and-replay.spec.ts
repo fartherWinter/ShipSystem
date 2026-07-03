@@ -24,6 +24,26 @@ test.describe('dispatch and battle replay flows', () => {
     await expect(row).toContainText('PROCESSING');
   });
 
+  test('dispatcher can start and stop a live battle session', async ({ page }) => {
+    await preloadSavedUser(page, 'dispatcher');
+    await installApiMocks(page, 'dispatcher');
+
+    await page.goto('/battle');
+
+    const startButton = page.locator('.battle-side-panel .ant-btn-primary').first();
+    await expect(startButton).toBeVisible();
+    await startButton.click();
+
+    await expect(page.getByText('session-live-302')).toBeVisible();
+    await expect(page.getByText('running').first()).toBeVisible();
+
+    const stopButton = page.locator('.battle-side-panel .ant-btn-dangerous').first();
+    await expect(stopButton).toBeEnabled();
+    await stopButton.click();
+
+    await expect(page.getByText('stopped').first()).toBeVisible();
+  });
+
   test('battle replay loads a session and can step to the next snapshot', async ({ page }) => {
     await preloadSavedUser(page, 'viewer');
     await installApiMocks(page, 'viewer');

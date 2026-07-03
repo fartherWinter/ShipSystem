@@ -37,6 +37,7 @@ export async function installApiMocks(page: Page, roleCode: RoleCode = 'viewer')
   };
   let nextShipID = 102;
   let nextDispatchEventID = 202;
+  let nextBattleSessionID = 302;
   const ships = [
     {
       id: 101,
@@ -178,10 +179,13 @@ export async function installApiMocks(page: Page, roleCode: RoleCode = 'viewer')
   };
   const battleSnapshotsBySession = {
     'session-alpha': [
-      createBattleSnapshot(0, '2026-07-02T09:00:00Z'),
-      createBattleSnapshot(1, '2026-07-02T09:01:00Z'),
-      createBattleSnapshot(2, '2026-07-02T09:02:00Z'),
+      createBattleSnapshot('session-alpha', 0, '2026-07-02T09:00:00Z'),
+      createBattleSnapshot('session-alpha', 1, '2026-07-02T09:01:00Z'),
+      createBattleSnapshot('session-alpha', 2, '2026-07-02T09:02:00Z'),
     ],
+  };
+  const battleStateBySession: Record<string, ReturnType<typeof createBattleState>> = {
+    'session-alpha': createBattleState('session-alpha', 'blue_victory', 2, '2026-07-02T09:02:00Z'),
   };
   const battleReportsBySession = {
     'session-alpha': {
@@ -410,6 +414,40 @@ export async function installApiMocks(page: Page, roleCode: RoleCode = 'viewer')
       return;
     }
 
+    if (path === '/api/v1/battle/sessions' && method === 'POST') {
+      const payload = route.request().postDataJSON() as Record<string, unknown>;
+      const id = nextBattleSessionID++;
+      const sessionId = `session-live-${id}`;
+      const session = {
+        id,
+        sessionId,
+        name: `Live Session ${id}`,
+        scenarioCode: String(payload.scenarioCode ?? battleScenario.code),
+        status: 'running',
+        startedAt: '2026-07-03T10:00:00Z',
+        stoppedAt: null,
+        lastScanAt: '2026-07-03T10:00:00Z',
+        createdAt: '2026-07-03T10:00:00Z',
+        updatedAt: '2026-07-03T10:00:00Z',
+      };
+      const state = createBattleState(sessionId, 'running', 0, '2026-07-03T10:00:00Z');
+      battleSessions.unshift(session);
+      battleStateBySession[sessionId] = state;
+      await json(route, 201, { session, state });
+      return;
+    }
+
+    if (/^\/api\/v1\/battle\/sessions\/[^/]+\/state$/.test(path) && method === 'GET') {
+      const sessionId = decodeURIComponent(path.split('/')[5]);
+      const item = battleStateBySession[sessionId as keyof typeof battleStateBySession];
+      if (!item) {
+        await json(route, 404, { message: 'battle state does not exist' });
+        return;
+      }
+      await json(route, 200, item);
+      return;
+    }
+
     if (/^\/api\/v1\/battle\/sessions\/[^/]+\/timeline$/.test(path) && method === 'GET') {
       const sessionId = decodeURIComponent(path.split('/')[5]);
       const items = battleTimelineBySession[sessionId as keyof typeof battleTimelineBySession];
@@ -443,11 +481,50 @@ export async function installApiMocks(page: Page, roleCode: RoleCode = 'viewer')
       return;
     }
 
+    if (/^\/api\/v1\/battle\/sessions\/[^/]+\/stop$/.test(path) && method === 'POST') {
+      const sessionId = decodeURIComponent(path.split('/')[5]);
+      const session = battleSessions.find((item) => item.sessionId === sessionId);
+      const state = battleStateBySession[sessionId as keyof typeof battleStateBySession];
+      if (!session || !state) {
+        await json(route, 404, { message: 'battle session does not exist' });
+        return;
+      }
+      session.status = 'stopped';
+      session.stoppedAt = '2026-07-03T10:05:00Z';
+      session.lastScanAt = '2026-07-03T10:05:00Z';
+      session.updatedAt = '2026-07-03T10:05:00Z';
+      battleStateBySession[sessionId] = {
+        ...state,
+        status: 'stopped',
+        updatedAt: '2026-07-03T10:05:00Z',
+      };
+      await json(route, 200, battleStateBySession[sessionId]);
+      return;
+    }
+
     if (path === '/api/v1/analytics/simulate/start' && method === 'POST') {
       await json(route, 200, {
         success: true,
         requestId: 'mock-analytics-start',
         message: 'simulator started',
+      });
+      return;
+    }
+
+    if (path === '/api/v1/analytics/simulate/battle/start' && method === 'POST') {
+      await json(route, 200, {
+        success: true,
+        requestId: 'mock-battle-start',
+        message: 'battle simulator started',
+      });
+      return;
+    }
+
+    if (path === '/api/v1/analytics/simulate/battle/stop' && method === 'POST') {
+      await json(route, 200, {
+        success: true,
+        requestId: 'mock-battle-stop',
+        message: 'battle simulator stopped',
       });
       return;
     }
@@ -458,18 +535,31 @@ export async function installApiMocks(page: Page, roleCode: RoleCode = 'viewer')
   await installMockWebSocket(page);
 }
 
-function createBattleSnapshot(tick: number, snapshotTime: string) {
+function createBattleState(sessionId: string, status: string, tick: number, snapshotTime: string) {
+  const snapshot = createBattleSnapshot(sessionId, tick, snapshotTime);
+  return {
+    sessionId,
+    status,
+    units: snapshot.units,
+    projectiles: snapshot.projectiles,
+    events: snapshot.events,
+    radarTargets: snapshot.radarTargets,
+    updatedAt: snapshotTime,
+  };
+}
+
+function createBattleSnapshot(sessionId: string, tick: number, snapshotTime: string) {
   const redDestroyed = tick >= 2;
   const redLongitude = 121.55 - tick * 0.01;
   const redLatitude = 31.24 - tick * 0.002;
   return {
     id: tick + 1,
-    sessionId: 'session-alpha',
+    sessionId,
     tick,
     snapshotTime,
     units: [
       {
-        sessionId: 'session-alpha',
+        sessionId,
         unitId: 'blue-01',
         shipId: 1,
         name: 'Blue Escort',
@@ -488,7 +578,7 @@ function createBattleSnapshot(tick: number, snapshotTime: string) {
         updatedAt: snapshotTime,
       },
       {
-        sessionId: 'session-alpha',
+        sessionId,
         unitId: 'red-01',
         shipId: 2,
         name: 'Red Frigate',
@@ -512,7 +602,7 @@ function createBattleSnapshot(tick: number, snapshotTime: string) {
         ? []
         : [
             {
-              sessionId: 'session-alpha',
+              sessionId,
               projectileId: `proj-${tick}`,
               sourceUnitId: 'blue-01',
               targetUnitId: 'red-01',
@@ -527,7 +617,7 @@ function createBattleSnapshot(tick: number, snapshotTime: string) {
           ],
     radarTargets: [
       {
-        sessionId: 'session-alpha',
+        sessionId,
         radarId: 'blue-radar-01',
         targetId: 'red-01',
         side: 'red',
@@ -546,7 +636,7 @@ function createBattleSnapshot(tick: number, snapshotTime: string) {
         ? [
             {
               id: 1,
-              sessionId: 'session-alpha',
+              sessionId,
               eventId: 'event-0',
               type: 'RADAR_CONTACT',
               severity: 'INFO',
@@ -563,7 +653,7 @@ function createBattleSnapshot(tick: number, snapshotTime: string) {
           ? [
               {
                 id: 2,
-                sessionId: 'session-alpha',
+                sessionId,
                 eventId: 'event-1',
                 type: 'WEAPON_RELEASE',
                 severity: 'WARN',
@@ -579,7 +669,7 @@ function createBattleSnapshot(tick: number, snapshotTime: string) {
           : [
               {
                 id: 3,
-                sessionId: 'session-alpha',
+                sessionId,
                 eventId: 'event-2',
                 type: 'TARGET_DESTROYED',
                 severity: 'CRITICAL',
