@@ -44,8 +44,35 @@ export default function BattlePage({ state, onStateChange }: Props) {
   }
 
   useEffect(() => {
-    loadScenarios();
+    void loadScenarios();
   }, []);
+
+  useEffect(() => {
+    if (state?.sessionId) {
+      return;
+    }
+    void restoreRunningSession();
+  }, [state?.sessionId]);
+
+  async function restoreRunningSession() {
+    setLoading(true);
+    setStateError('');
+    try {
+      const sessions = await api.battleSessions({ page: 1, size: 100 });
+      const runningSession = sessions.items.find((item) => item.status === 'running');
+      if (!runningSession) {
+        return;
+      }
+      setScenarioCode(runningSession.scenarioCode);
+      onStateChange(await api.battleState(runningSession.sessionId));
+    } catch (err) {
+      const text = err instanceof Error ? err.message : '恢复运行中对战失败';
+      setStateError(text);
+      message.error(text);
+    } finally {
+      setLoading(false);
+    }
+  }
 
   async function start() {
     if (!scenario) {
