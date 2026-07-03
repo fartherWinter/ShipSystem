@@ -51,6 +51,48 @@ export async function installApiMocks(page: Page, roleCode: RoleCode = 'viewer')
       updatedAt: '2026-07-01T00:00:00Z',
     },
   ];
+  const alarms = [
+    {
+      id: 401,
+      shipId: 101,
+      ship: ships[0],
+      type: 'SPEEDING',
+      level: 'CRITICAL',
+      title: 'Speed breach alert',
+      message: 'Patrol ship exceeded the configured speed corridor.',
+      longitude: 121.5123,
+      latitude: 31.2245,
+      status: 'OPEN',
+      ackBy: null,
+      ackAt: null,
+      createdAt: '2026-07-02T02:00:00Z',
+      updatedAt: '2026-07-02T02:00:00Z',
+    },
+  ];
+  const tracksByShip = {
+    101: [
+      {
+        id: 501,
+        shipId: 101,
+        longitude: 121.49,
+        latitude: 31.23,
+        speedKnots: 16.5,
+        course: 42,
+        reportedAt: '2026-07-02T08:00:00Z',
+        createdAt: '2026-07-02T08:00:00Z',
+      },
+      {
+        id: 502,
+        shipId: 101,
+        longitude: 121.505,
+        latitude: 31.236,
+        speedKnots: 17.1,
+        course: 48,
+        reportedAt: '2026-07-02T08:05:00Z',
+        createdAt: '2026-07-02T08:05:00Z',
+      },
+    ],
+  };
   const dispatchEvents = [
     {
       id: 201,
@@ -267,8 +309,34 @@ export async function installApiMocks(page: Page, roleCode: RoleCode = 'viewer')
       return;
     }
 
+    if (/^\/api\/v1\/ships\/\d+\/tracks$/.test(path) && method === 'GET') {
+      const shipID = Number(path.split('/')[4]);
+      const items = tracksByShip[shipID as keyof typeof tracksByShip] ?? [];
+      await json(route, 200, { items });
+      return;
+    }
+
     if (path === '/api/v1/alarms' && method === 'GET') {
-      await json(route, 200, { items: [], total: 0 });
+      const status = url.searchParams.get('status');
+      const items = status ? alarms.filter((item) => item.status === status) : alarms;
+      await json(route, 200, { items, total: items.length });
+      return;
+    }
+
+    if (/^\/api\/v1\/alarms\/\d+\/ack$/.test(path) && method === 'PUT') {
+      const alarmID = Number(path.split('/')[4]);
+      const target = alarms.find((item) => item.id === alarmID);
+      if (!target) {
+        await json(route, 404, { message: 'alarm does not exist' });
+        return;
+      }
+      Object.assign(target, {
+        status: 'ACKED',
+        ackBy: user.id,
+        ackAt: '2026-07-03T01:00:00Z',
+        updatedAt: '2026-07-03T01:00:00Z',
+      });
+      await json(route, 200, target);
       return;
     }
 
@@ -372,6 +440,15 @@ export async function installApiMocks(page: Page, roleCode: RoleCode = 'viewer')
         return;
       }
       await json(route, 200, item);
+      return;
+    }
+
+    if (path === '/api/v1/analytics/simulate/start' && method === 'POST') {
+      await json(route, 200, {
+        success: true,
+        requestId: 'mock-analytics-start',
+        message: 'simulator started',
+      });
       return;
     }
 
