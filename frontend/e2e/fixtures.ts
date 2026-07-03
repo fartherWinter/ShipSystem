@@ -2,6 +2,12 @@ import type { Page, Route } from '@playwright/test';
 
 type RoleCode = 'super_admin' | 'admin' | 'dispatcher' | 'viewer';
 
+declare global {
+  interface Window {
+    __mockWsEmit?: (payload: unknown) => void;
+  }
+}
+
 type MockUser = {
   id: number;
   username: string;
@@ -711,8 +717,19 @@ export async function preloadSavedUser(page: Page, roleCode: RoleCode = 'viewer'
   }, user);
 }
 
+export async function emitMockWsMessage(page: Page, payload: unknown): Promise<void> {
+  await page.evaluate((message) => {
+    if (typeof window.__mockWsEmit !== 'function') {
+      throw new Error('mock websocket emitter is not installed');
+    }
+    window.__mockWsEmit(message);
+  }, payload);
+}
+
 async function installMockWebSocket(page: Page): Promise<void> {
   await page.addInitScript(() => {
+    const sockets = new Set<MockWebSocket>();
+
     class MockWebSocket {
       static OPEN = 1;
       static CLOSED = 3;
@@ -725,6 +742,7 @@ async function installMockWebSocket(page: Page): Promise<void> {
 
       constructor(url: string) {
         this.url = url;
+        sockets.add(this);
         window.setTimeout(() => {
           this.onopen?.(new Event('open'));
         }, 0);
@@ -732,11 +750,21 @@ async function installMockWebSocket(page: Page): Promise<void> {
 
       close() {
         this.readyState = MockWebSocket.CLOSED;
+        sockets.delete(this);
         this.onclose?.(new CloseEvent('close'));
       }
 
       send() {}
     }
+
+    window.__mockWsEmit = (payload: unknown) => {
+      const data = JSON.stringify(payload);
+      sockets.forEach((socket) => {
+        if (socket.readyState === MockWebSocket.OPEN) {
+          socket.onmessage?.(new MessageEvent('message', { data }));
+        }
+      });
+    };
 
     Object.defineProperty(window, 'WebSocket', {
       configurable: true,
