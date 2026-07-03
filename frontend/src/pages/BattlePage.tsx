@@ -54,6 +54,47 @@ export default function BattlePage({ state, onStateChange }: Props) {
     void restoreRunningSession();
   }, [state?.sessionId]);
 
+  useEffect(() => {
+    if (!state?.sessionId || state.status !== 'running') {
+      return;
+    }
+
+    let syncing = false;
+    const timer = window.setInterval(() => {
+      if (syncing) {
+        return;
+      }
+      syncing = true;
+      void loadBattleState(state.sessionId, { silent: true }).finally(() => {
+        syncing = false;
+      });
+    }, 5000);
+
+    return () => window.clearInterval(timer);
+  }, [state?.sessionId, state?.status]);
+
+  async function loadBattleState(sessionId: string, options?: { silent?: boolean; showLoading?: boolean }) {
+    const silent = options?.silent ?? false;
+    const showLoading = options?.showLoading ?? false;
+    if (showLoading) {
+      setLoading(true);
+    }
+    setStateError('');
+    try {
+      onStateChange(await api.battleState(sessionId));
+    } catch (err) {
+      const text = err instanceof Error ? err.message : '刷新战斗状态失败';
+      setStateError(text);
+      if (!silent) {
+        message.error(text);
+      }
+    } finally {
+      if (showLoading) {
+        setLoading(false);
+      }
+    }
+  }
+
   async function restoreRunningSession() {
     setLoading(true);
     setStateError('');
@@ -64,7 +105,7 @@ export default function BattlePage({ state, onStateChange }: Props) {
         return;
       }
       setScenarioCode(runningSession.scenarioCode);
-      onStateChange(await api.battleState(runningSession.sessionId));
+      await loadBattleState(runningSession.sessionId, { silent: true });
     } catch (err) {
       const text = err instanceof Error ? err.message : '恢复运行中对战失败';
       setStateError(text);
@@ -119,7 +160,7 @@ export default function BattlePage({ state, onStateChange }: Props) {
     setLoading(true);
     setStateError('');
     try {
-      onStateChange(await api.battleState(state.sessionId));
+      await loadBattleState(state.sessionId, { silent: false });
     } catch (err) {
       const text = err instanceof Error ? err.message : '刷新战斗状态失败';
       setStateError(text);
@@ -240,6 +281,7 @@ function LiveBattlePanel({
                 <Tag color={statusColor(state?.status)}>{state?.status ?? '未启动'}</Tag>
                 {state?.sessionId && <Typography.Text copyable>{state.sessionId}</Typography.Text>}
               </Space>
+              {state?.updatedAt && <Typography.Text type="secondary">最近同步：{formatTime(state.updatedAt)}</Typography.Text>}
             </Space>
           </Card>
 
