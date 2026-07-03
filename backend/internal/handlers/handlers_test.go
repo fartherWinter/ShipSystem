@@ -3,6 +3,7 @@ package handlers
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -1953,6 +1954,83 @@ func TestMonitorWSSucceedsWithValidTokenAndTracksHubLifecycle(t *testing.T) {
 	}
 	if !waitForActiveClients(hub, 0) {
 		t.Fatalf("expected websocket client to unregister after close, got %#v", hub.Stats())
+	}
+}
+
+func TestMonitorWSAcceptsCookieTokenWhenQueryIsMissing(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	hub := ws.NewHub()
+	go hub.Run()
+
+	handler := NewHandler(&fakeAuthService{
+		parseTokenFn: func(tokenText string) (*services.Claims, error) {
+			if tokenText != "cookie-good-token" {
+				t.Fatalf("expected cookie token, got %q", tokenText)
+			}
+			return &services.Claims{Username: "demo"}, nil
+		},
+	}, nil, nil, hub, 0, false, []string{"http://127.0.0.1"})
+	router := gin.New()
+	router.GET("/ws/monitor", handler.MonitorWS)
+
+	server := httptest.NewServer(router)
+	defer server.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/ws/monitor"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, http.Header{
+		"Origin": []string{"http://127.0.0.1"},
+		"Cookie": []string{middleware.TokenCookieName + "=cookie-good-token"},
+	})
+	if err != nil {
+		t.Fatalf("dial websocket with cookie token: %v", err)
+	}
+	if !waitForActiveClients(hub, 1) {
+		t.Fatalf("expected one active websocket client, got %#v", hub.Stats())
+	}
+	_ = conn.Close()
+	if !waitForActiveClients(hub, 0) {
+		t.Fatalf("expected websocket client to unregister after close, got %#v", hub.Stats())
+	}
+}
+
+func TestMonitorWSRejectsUnexpectedOriginDuringUpgrade(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	hub := ws.NewHub()
+	go hub.Run()
+
+	handler := NewHandler(&fakeAuthService{
+		parseTokenFn: func(tokenText string) (*services.Claims, error) {
+			return &services.Claims{Username: "demo"}, nil
+		},
+	}, nil, nil, hub, 0, false, []string{"http://127.0.0.1"})
+	router := gin.New()
+	router.GET("/ws/monitor", handler.MonitorWS)
+
+	server := httptest.NewServer(router)
+	defer server.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/ws/monitor?token=good-token"
+	_, resp, err := websocket.DefaultDialer.Dial(wsURL, http.Header{"Origin": []string{"http://evil.example"}})
+	if err == nil {
+		t.Fatal("expected websocket upgrade to reject unexpected origin")
+	}
+	if resp == nil || resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected 403 response for unexpected origin, got %#v", resp)
+	}
+	if !waitForActiveClients(hub, 0) {
+		t.Fatalf("expected no registered clients after rejected upgrade, got %#v", hub.Stats())
+	}
+}
+
+func TestSecureRequestReturnsTrueWhenTLSIsPresent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.TLS = &tls.ConnectionState{}
+	c.Request = req
+
+	if !secureRequest(c) {
+		t.Fatal("expected TLS request to be treated as secure")
 	}
 }
 
