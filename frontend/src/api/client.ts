@@ -16,9 +16,9 @@ import type {
   DispatchEventCreateRequest,
   DispatchEventPageResult,
   DispatchStatusUpdateRequest,
+  LocationReportResponse,
   LoginResponse,
   MenuListResponse,
-  LocationReportResponse,
   RoleListResponse,
   Ship,
   ShipLocationReportRequest,
@@ -38,8 +38,8 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   if (!resp.ok) {
     const body = await resp.json().catch(() => ({}));
     const requestId = typeof body.requestId === 'string' ? body.requestId : resp.headers.get('X-Request-ID');
-    const message = body.message ?? `请求失败：${resp.status}`;
-    throw new Error(requestId ? `${message}（请求ID：${requestId}）` : message);
+    const message = typeof body.message === 'string' ? body.message : `请求失败：${resp.status}`;
+    throw new Error(requestId ? `${message}（请求 ID：${requestId}）` : message);
   }
   if (resp.status === 204) {
     return undefined as T;
@@ -112,11 +112,22 @@ export const api = {
   menus: () => request<MenuListResponse>('/rbac/menus'),
 };
 
+export async function getSimulatorStatus() {
+  return request<AnalyticsProxyResponse>('/analytics/simulate/status');
+}
+
 export async function startSimulator(shipIds: number[]) {
   const payload: SimulationStartRequest = { shipIds };
   return request<AnalyticsProxyResponse>('/analytics/simulate/start', {
     method: 'POST',
     body: JSON.stringify(payload),
+  });
+}
+
+export async function stopSimulator() {
+  return request<AnalyticsProxyResponse>('/analytics/simulate/stop', {
+    method: 'POST',
+    body: JSON.stringify({}),
   });
 }
 
