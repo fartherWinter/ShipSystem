@@ -6,6 +6,7 @@ declare global {
   interface Window {
     __mockWsEmit?: (payload: unknown) => void;
     __mockWsCloseAll?: () => void;
+    __mockWsStats?: () => { open: number; totalCreated: number };
   }
 }
 
@@ -736,9 +737,19 @@ export async function closeMockWsConnections(page: Page): Promise<void> {
   });
 }
 
+export async function readMockWsStats(page: Page): Promise<{ open: number; totalCreated: number }> {
+  return page.evaluate(() => {
+    if (typeof window.__mockWsStats !== 'function') {
+      throw new Error('mock websocket stats reader is not installed');
+    }
+    return window.__mockWsStats();
+  });
+}
+
 async function installMockWebSocket(page: Page): Promise<void> {
   await page.addInitScript(() => {
     const sockets = new Set<MockWebSocket>();
+    let totalCreated = 0;
 
     class MockWebSocket {
       static OPEN = 1;
@@ -752,6 +763,7 @@ async function installMockWebSocket(page: Page): Promise<void> {
 
       constructor(url: string) {
         this.url = url;
+        totalCreated += 1;
         sockets.add(this);
         window.setTimeout(() => {
           this.onopen?.(new Event('open'));
@@ -782,6 +794,10 @@ async function installMockWebSocket(page: Page): Promise<void> {
         }
       });
     };
+    window.__mockWsStats = () => ({
+      open: Array.from(sockets).filter((socket) => socket.readyState === MockWebSocket.OPEN).length,
+      totalCreated,
+    });
 
     Object.defineProperty(window, 'WebSocket', {
       configurable: true,
