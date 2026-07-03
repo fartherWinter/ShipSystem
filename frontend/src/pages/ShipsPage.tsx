@@ -1,12 +1,49 @@
 import { Alert, Button, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, Tag, Typography, message } from 'antd';
 import { Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
 import type { Ship } from '../types';
+
+function formatDateTime(value?: string | null) {
+  if (!value) {
+    return '-';
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+  return parsed.toLocaleString('zh-CN', {
+    hour12: false,
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+}
+
+function compareShips(left: Ship, right: Ship) {
+  const leftTime = Date.parse(left.updatedAt || left.createdAt);
+  const rightTime = Date.parse(right.updatedAt || right.createdAt);
+  if (Number.isNaN(leftTime) && Number.isNaN(rightTime)) {
+    return right.id - left.id;
+  }
+  if (Number.isNaN(leftTime)) {
+    return 1;
+  }
+  if (Number.isNaN(rightTime)) {
+    return -1;
+  }
+  if (rightTime !== leftTime) {
+    return rightTime - leftTime;
+  }
+  return right.id - left.id;
+}
 
 export default function ShipsPage() {
   const [items, setItems] = useState<Ship[]>([]);
   const [keyword, setKeyword] = useState('');
+  const [queryKeyword, setQueryKeyword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -16,10 +53,19 @@ export default function ShipsPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [total, setTotal] = useState(0);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState('');
   const [form] = Form.useForm();
 
-  async function load(nextKeyword = keyword, nextPage = page, nextPageSize = pageSize) {
+  const sortedItems = useMemo(() => [...items].sort(compareShips), [items]);
+
+  async function load(
+    nextKeyword = queryKeyword,
+    nextPage = page,
+    nextPageSize = pageSize,
+    options?: { silent?: boolean },
+  ) {
     const normalizedKeyword = nextKeyword.trim();
+    const silent = options?.silent ?? false;
     setLoading(true);
     setError('');
     try {
@@ -28,10 +74,14 @@ export default function ShipsPage() {
       setTotal(data.total);
       setPage(nextPage);
       setPageSize(nextPageSize);
+      setQueryKeyword(normalizedKeyword);
+      setLastUpdatedAt(new Date().toISOString());
     } catch (err) {
       const text = err instanceof Error ? err.message : '加载船舶列表失败';
       setError(text);
-      message.error(text);
+      if (!silent) {
+        message.error(text);
+      }
     } finally {
       setLoading(false);
     }
@@ -40,6 +90,13 @@ export default function ShipsPage() {
   useEffect(() => {
     void load('', 1, pageSize);
   }, []);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      void load(queryKeyword, page, pageSize, { silent: true });
+    }, 15000);
+    return () => window.clearInterval(timer);
+  }, [page, pageSize, queryKeyword]);
 
   function showModal(ship?: Ship) {
     setEditing(ship ?? null);
@@ -66,7 +123,7 @@ export default function ShipsPage() {
         message.success('船舶已创建');
       }
       closeModal();
-      await load(keyword, page, pageSize);
+      await load(queryKeyword, page, pageSize);
     } catch (err) {
       message.error(err instanceof Error ? err.message : '保存船舶失败');
     } finally {
@@ -80,7 +137,7 @@ export default function ShipsPage() {
       await api.deleteShip(id);
       message.success('船舶已删除');
       const nextPage = page > 1 && items.length === 1 ? page - 1 : page;
-      await load(keyword, nextPage, pageSize);
+      await load(queryKeyword, nextPage, pageSize);
     } catch (err) {
       message.error(err instanceof Error ? err.message : '删除船舶失败');
     } finally {
@@ -105,18 +162,29 @@ export default function ShipsPage() {
               void load(nextKeyword, 1, pageSize);
             }}
           />
-          <Button icon={<RefreshCw size={16} />} loading={loading} onClick={() => void load(keyword, page, pageSize)} />
+          <Button icon={<RefreshCw size={16} />} loading={loading} onClick={() => void load(queryKeyword, page, pageSize)} />
           <Button type="primary" icon={<Plus size={16} />} onClick={() => showModal()}>
             新增船舶
           </Button>
         </Space>
       </div>
-      {error && <Alert type="error" showIcon message="船舶列表加载失败" description={error} action={<Button onClick={() => void load(keyword, page, pageSize)}>重试</Button>} />}
-      <Typography.Text type="secondary">当前显示 {items.length} / {total} 艘船舶</Typography.Text>
+      {error && (
+        <Alert
+          type="error"
+          showIcon
+          message="船舶列表加载失败"
+          description={error}
+          action={<Button onClick={() => void load(queryKeyword, page, pageSize)}>重试</Button>}
+        />
+      )}
+      <Space direction="vertical" size={4}>
+        <Typography.Text type="secondary">当前显示 {sortedItems.length} / {total} 艘船舶</Typography.Text>
+        <Typography.Text type="secondary">最近刷新：{formatDateTime(lastUpdatedAt)}</Typography.Text>
+      </Space>
       <Table
         rowKey="id"
         loading={loading}
-        dataSource={items}
+        dataSource={sortedItems}
         pagination={{
           current: page,
           pageSize,
@@ -124,7 +192,7 @@ export default function ShipsPage() {
           showSizeChanger: true,
           showTotal: (value) => `共 ${value} 艘`,
           onChange: (nextPage, nextPageSize) => {
-            void load(keyword, nextPage, nextPageSize);
+            void load(queryKeyword, nextPage, nextPageSize);
           },
         }}
         locale={{
@@ -133,10 +201,14 @@ export default function ShipsPage() {
         columns={[
           { title: '船名', dataIndex: 'name' },
           { title: 'MMSI', dataIndex: 'mmsi' },
-          { title: '类型', dataIndex: 'shipType' },
-          { title: '船旗', dataIndex: 'flag' },
+          { title: '类型', dataIndex: 'shipType', render: (value) => value || '-' },
+          { title: '船旗', dataIndex: 'flag', render: (value) => value || '-' },
           { title: '尺度', render: (_, item) => `${item.lengthM || 0}m x ${item.widthM || 0}m` },
-          { title: '状态', render: (_, item) => <Tag color={item.status === 'active' ? 'green' : 'default'}>{item.status}</Tag> },
+          {
+            title: '状态',
+            render: (_, item) => <Tag color={item.status === 'active' ? 'green' : item.status === 'maintenance' ? 'orange' : 'default'}>{item.status}</Tag>,
+          },
+          { title: '更新时间', render: (_, item) => formatDateTime(item.updatedAt) },
           {
             title: '操作',
             width: 150,
@@ -151,14 +223,7 @@ export default function ShipsPage() {
           },
         ]}
       />
-      <Modal
-        title={editing ? '编辑船舶' : '新增船舶'}
-        open={open}
-        confirmLoading={saving}
-        onOk={save}
-        onCancel={closeModal}
-        destroyOnHidden
-      >
+      <Modal title={editing ? '编辑船舶' : '新增船舶'} open={open} confirmLoading={saving} onOk={save} onCancel={closeModal} destroyOnHidden>
         <Form form={form} layout="vertical">
           <Form.Item name="name" label="船名" rules={[{ required: true }]}>
             <Input />

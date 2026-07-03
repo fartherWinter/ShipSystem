@@ -1,4 +1,4 @@
-import { Alert, Button, Form, Input, Modal, Select, Space, Table, Tag, Typography, message } from 'antd';
+import { Alert, Button, Card, Col, Form, Input, Modal, Row, Select, Space, Statistic, Table, Tag, Typography, message } from 'antd';
 import { Plus, RefreshCw } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { api, listAllDispatchEvents, listAllShips } from '../api/client';
@@ -32,7 +32,10 @@ function priorityColor(priority: string) {
   return priority === 'high' ? 'red' : 'blue';
 }
 
-function formatDateTime(value: string) {
+function formatDateTime(value?: string | null) {
+  if (!value) {
+    return '-';
+  }
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) {
     return value;
@@ -44,7 +47,26 @@ function formatDateTime(value: string) {
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
+    second: '2-digit',
   });
+}
+
+function compareDispatchEvents(left: DispatchEvent, right: DispatchEvent) {
+  const leftTime = Date.parse(left.updatedAt || left.createdAt);
+  const rightTime = Date.parse(right.updatedAt || right.createdAt);
+  if (Number.isNaN(leftTime) && Number.isNaN(rightTime)) {
+    return right.id - left.id;
+  }
+  if (Number.isNaN(leftTime)) {
+    return 1;
+  }
+  if (Number.isNaN(rightTime)) {
+    return -1;
+  }
+  if (rightTime !== leftTime) {
+    return rightTime - leftTime;
+  }
+  return right.id - left.id;
 }
 
 type Props = {
@@ -64,58 +86,110 @@ export default function DispatchPage({ items, onItemsChange }: Props) {
   const [statusOpen, setStatusOpen] = useState(false);
   const [keyword, setKeyword] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [priorityFilter, setPriorityFilter] = useState('');
+  const [shipFilter, setShipFilter] = useState<number | undefined>();
   const [statusTarget, setStatusTarget] = useState<DispatchEvent | null>(null);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState('');
   const [form] = Form.useForm();
   const [statusForm] = Form.useForm();
 
+  const shipOptions = useMemo(
+    () =>
+      [...ships]
+        .sort((left, right) => left.name.localeCompare(right.name, 'zh-CN') || left.id - right.id)
+        .map((ship) => ({ label: `${ship.name} / ${ship.mmsi}`, value: ship.id })),
+    [ships],
+  );
+
+  const sortedItems = useMemo(() => [...items].sort(compareDispatchEvents), [items]);
+
   const filteredItems = useMemo(() => {
     const normalizedKeyword = keyword.trim().toLowerCase();
-    return items.filter((item) => {
+    return sortedItems.filter((item) => {
       if (statusFilter && item.status !== statusFilter) {
+        return false;
+      }
+      if (priorityFilter && item.priority !== priorityFilter) {
+        return false;
+      }
+      if (shipFilter !== undefined && item.shipId !== shipFilter) {
         return false;
       }
       if (!normalizedKeyword) {
         return true;
       }
-      const haystack = [item.title, item.description, item.ship?.name, item.priority, item.status].filter(Boolean).join(' ').toLowerCase();
+      const haystack = [item.title, item.description, item.ship?.name, item.priority, item.status]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
       return haystack.includes(normalizedKeyword);
     });
-  }, [items, keyword, statusFilter]);
+  }, [keyword, priorityFilter, shipFilter, sortedItems, statusFilter]);
 
-  async function loadEvents() {
+  const stats = useMemo(() => {
+    const pendingCount = items.filter((item) => item.status !== 'COMPLETED' && item.status !== 'CANCELLED').length;
+    const completedCount = items.filter((item) => item.status === 'COMPLETED').length;
+    const highPriorityCount = items.filter((item) => item.priority === 'high').length;
+    return {
+      total: items.length,
+      pendingCount,
+      completedCount,
+      highPriorityCount,
+    };
+  }, [items]);
+
+  async function loadEvents(options?: { silent?: boolean }) {
+    const silent = options?.silent ?? false;
     setLoading(true);
     setError('');
     try {
       onItemsChange(await listAllDispatchEvents());
+      setLastUpdatedAt(new Date().toISOString());
+      return true;
     } catch (err) {
       const text = err instanceof Error ? err.message : '加载调度事件失败';
       setError(text);
-      message.error(text);
+      if (!silent) {
+        message.error(text);
+      }
+      return false;
     } finally {
       setLoading(false);
     }
   }
 
-  async function loadShips() {
+  async function loadShips(options?: { silent?: boolean }) {
+    const silent = options?.silent ?? false;
     setShipsLoading(true);
     setShipsError('');
     try {
       setShips(await listAllShips());
+      return true;
     } catch (err) {
       const text = err instanceof Error ? err.message : '加载船舶列表失败';
       setShipsError(text);
-      message.error(text);
+      if (!silent) {
+        message.error(text);
+      }
+      return false;
     } finally {
       setShipsLoading(false);
     }
   }
 
-  async function refreshAll() {
-    await Promise.all([loadEvents(), loadShips()]);
+  async function refreshAll(options?: { silent?: boolean }) {
+    await Promise.all([loadEvents(options), loadShips(options)]);
   }
 
   useEffect(() => {
-    refreshAll();
+    void refreshAll();
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      void refreshAll({ silent: true });
+    }, 15000);
+    return () => window.clearInterval(timer);
   }, []);
 
   function openCreateModal() {
@@ -195,18 +269,79 @@ export default function DispatchPage({ items, onItemsChange }: Props) {
             allowClear
             value={statusFilter || undefined}
             placeholder="筛选状态"
-            style={{ width: 170 }}
+            style={{ width: 160 }}
             options={statusOptions}
             onChange={(value) => setStatusFilter(value ?? '')}
           />
-          <Button icon={<RefreshCw size={16} />} loading={loading || shipsLoading} onClick={refreshAll} />
+          <Select
+            allowClear
+            value={priorityFilter || undefined}
+            placeholder="筛选优先级"
+            style={{ width: 160 }}
+            options={priorityOptions}
+            onChange={(value) => setPriorityFilter(value ?? '')}
+          />
+          <Select
+            allowClear
+            showSearch
+            optionFilterProp="label"
+            value={shipFilter}
+            placeholder="筛选关联船舶"
+            style={{ width: 240 }}
+            loading={shipsLoading}
+            options={shipOptions}
+            onChange={(value) => setShipFilter(value)}
+          />
+          <Button icon={<RefreshCw size={16} />} loading={loading || shipsLoading} onClick={() => void refreshAll()} />
           <Button type="primary" icon={<Plus size={16} />} onClick={openCreateModal}>
             新建事件
           </Button>
         </Space>
       </div>
-      {error && <Alert type="error" showIcon message="调度事件加载失败" description={error} action={<Button onClick={loadEvents}>重试</Button>} />}
-      <Typography.Text type="secondary">当前显示 {filteredItems.length} / {items.length} 条调度事件</Typography.Text>
+      {error && (
+        <Alert
+          type="error"
+          showIcon
+          message="调度事件加载失败"
+          description={error}
+          action={<Button onClick={() => void refreshAll()}>重试</Button>}
+        />
+      )}
+      {shipsError && (
+        <Alert
+          type="warning"
+          showIcon
+          message="船舶列表加载失败"
+          description={shipsError}
+          action={<Button onClick={() => void loadShips()}>重试</Button>}
+        />
+      )}
+      <Row gutter={[16, 16]}>
+        <Col xs={24} sm={12} xl={6}>
+          <Card loading={loading}>
+            <Statistic title="事件总数" value={stats.total} />
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} xl={6}>
+          <Card loading={loading}>
+            <Statistic title="待跟进" value={stats.pendingCount} valueStyle={{ color: stats.pendingCount ? '#d97706' : '#0f766e' }} />
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} xl={6}>
+          <Card loading={loading}>
+            <Statistic title="已完成" value={stats.completedCount} valueStyle={{ color: '#15803d' }} />
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} xl={6}>
+          <Card loading={loading}>
+            <Statistic title="高优先级" value={stats.highPriorityCount} valueStyle={{ color: stats.highPriorityCount ? '#b91c1c' : undefined }} />
+          </Card>
+        </Col>
+      </Row>
+      <Space direction="vertical" size={4}>
+        <Typography.Text type="secondary">当前显示 {filteredItems.length} / {items.length} 条调度事件</Typography.Text>
+        <Typography.Text type="secondary">最近刷新：{formatDateTime(lastUpdatedAt)}</Typography.Text>
+      </Space>
       <Table
         rowKey="id"
         loading={loading}
@@ -224,6 +359,7 @@ export default function DispatchPage({ items, onItemsChange }: Props) {
           { title: '优先级', render: (_, item) => <Tag color={priorityColor(item.priority)}>{item.priority}</Tag> },
           { title: '状态', render: (_, item) => <Tag color={statusColor(item.status)}>{item.status}</Tag> },
           { title: '创建时间', render: (_, item) => formatDateTime(item.createdAt) },
+          { title: '更新时间', render: (_, item) => formatDateTime(item.updatedAt) },
           { title: '说明', dataIndex: 'description', ellipsis: true },
           {
             title: '流转',
@@ -243,7 +379,16 @@ export default function DispatchPage({ items, onItemsChange }: Props) {
       />
       <Modal title="新建调度事件" open={open} confirmLoading={saving} onOk={create} onCancel={closeCreateModal} destroyOnHidden>
         <Form form={form} layout="vertical" initialValues={{ priority: 'normal' }}>
-          {shipsError && <Alert type="error" showIcon message="关联船舶加载失败" description={shipsError} action={<Button onClick={loadShips}>重试</Button>} style={{ marginBottom: 16 }} />}
+          {shipsError && (
+            <Alert
+              type="error"
+              showIcon
+              message="关联船舶加载失败"
+              description={shipsError}
+              action={<Button onClick={() => void loadShips()}>重试</Button>}
+              style={{ marginBottom: 16 }}
+            />
+          )}
           <Form.Item name="title" label="标题" rules={[{ required: true }]}>
             <Input />
           </Form.Item>
@@ -254,7 +399,7 @@ export default function DispatchPage({ items, onItemsChange }: Props) {
               optionFilterProp="label"
               loading={shipsLoading}
               placeholder="可选：绑定到具体船舶"
-              options={ships.map((ship) => ({ label: `${ship.name} / ${ship.mmsi}`, value: ship.id }))}
+              options={shipOptions}
             />
           </Form.Item>
           <Form.Item name="priority" label="优先级">
@@ -278,7 +423,7 @@ export default function DispatchPage({ items, onItemsChange }: Props) {
             <Select options={statusOptions} />
           </Form.Item>
           <Form.Item name="remark" label="流转备注">
-            <Input.TextArea rows={4} placeholder="可选：记录此次状态变更原因或交接信息" />
+            <Input.TextArea rows={4} placeholder="可选：记录本次状态变更原因或交接信息" />
           </Form.Item>
         </Form>
       </Modal>
