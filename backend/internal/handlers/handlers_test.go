@@ -1256,6 +1256,92 @@ func TestAnalyticsStatusReturnsStructuredUpstreamError(t *testing.T) {
 	}
 }
 
+func TestStartSimulationReturnsValidationMessage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(
+		nil,
+		nil,
+		services.NewAnalyticsService(config.Config{AnalyticsBaseURL: "http://127.0.0.1:65535"}),
+		nil,
+		0,
+		false,
+		nil,
+	)
+	router := gin.New()
+	router.POST("/analytics/simulate/start", handler.StartSimulation)
+
+	req := httptest.NewRequest(http.MethodPost, "/analytics/simulate/start", bytes.NewBufferString(`{"shipIds":[0]}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["message"] != "shipIds must contain only positive IDs" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
+func TestStartSimulationReturnsStructuredUpstreamError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, nil, &fakeAnalyticsService{
+		startSimulationFn: func(ctx context.Context, req services.SimulationStartRequest) (map[string]interface{}, error) {
+			return nil, &services.AnalyticsError{
+				StatusCode: http.StatusTooManyRequests,
+				Message:    "rate limited by analytics",
+				RequestID:  "trace-analytics-start",
+			}
+		},
+	}, nil, 0, false, nil)
+	router := gin.New()
+	router.POST("/analytics/simulate/start", handler.StartSimulation)
+
+	req := httptest.NewRequest(http.MethodPost, "/analytics/simulate/start", bytes.NewBufferString(`{"shipIds":[1,2]}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["message"] != "rate limited by analytics" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+	if body["upstreamStatus"] != float64(http.StatusTooManyRequests) {
+		t.Fatalf("unexpected upstreamStatus: %#v", body)
+	}
+	if body["upstreamRequestId"] != "trace-analytics-start" {
+		t.Fatalf("unexpected upstreamRequestId: %#v", body)
+	}
+}
+
+func TestStopSimulationReturnsBadGatewayWithoutLeakingInternalError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, nil, &fakeAnalyticsService{
+		stopSimulationFn: func(ctx context.Context) (map[string]interface{}, error) {
+			return nil, io.ErrUnexpectedEOF
+		},
+	}, nil, 0, false, nil)
+	router := gin.New()
+	router.POST("/analytics/simulate/stop", handler.StopSimulation)
+
+	req := httptest.NewRequest(http.MethodPost, "/analytics/simulate/stop", bytes.NewBufferString(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["message"] != "analytics service request failed" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
 func TestStartBattleSimulationReturnsValidationMessage(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	handler := NewHandler(
@@ -1281,6 +1367,92 @@ func TestStartBattleSimulationReturnsValidationMessage(t *testing.T) {
 	body := decodeJSONBody(t, recorder)
 	if body["message"] != "battle simulation origin coordinates are invalid" {
 		t.Fatalf("expected validation message, got %#v", body)
+	}
+}
+
+func TestStartBattleSimulationReturnsStructuredUpstreamError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, nil, &fakeAnalyticsService{
+		startBattleSimulationFn: func(ctx context.Context, req services.BattleSimulationStartRequest) (map[string]interface{}, error) {
+			return nil, &services.AnalyticsError{
+				StatusCode: http.StatusServiceUnavailable,
+				Message:    "battle simulator unavailable",
+				RequestID:  "trace-battle-start",
+			}
+		},
+	}, nil, 0, false, nil)
+	router := gin.New()
+	router.POST("/analytics/simulate/battle/start", handler.StartBattleSimulation)
+
+	req := httptest.NewRequest(http.MethodPost, "/analytics/simulate/battle/start", bytes.NewBufferString(`{"sessionId":"battle-1","scenarioCode":"open-water-duel","originLongitude":121.49,"originLatitude":31.23}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["message"] != "battle simulator unavailable" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+	if body["upstreamStatus"] != float64(http.StatusServiceUnavailable) {
+		t.Fatalf("unexpected upstreamStatus: %#v", body)
+	}
+	if body["upstreamRequestId"] != "trace-battle-start" {
+		t.Fatalf("unexpected upstreamRequestId: %#v", body)
+	}
+}
+
+func TestStopBattleSimulationReturnsValidationMessage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(
+		nil,
+		nil,
+		services.NewAnalyticsService(config.Config{AnalyticsBaseURL: "http://127.0.0.1:65535"}),
+		nil,
+		0,
+		false,
+		nil,
+	)
+	router := gin.New()
+	router.POST("/analytics/simulate/battle/stop", handler.StopBattleSimulation)
+
+	req := httptest.NewRequest(http.MethodPost, "/analytics/simulate/battle/stop", bytes.NewBufferString(`{"sessionId":"   "}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["message"] != "sessionId is required" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
+func TestStopBattleSimulationReturnsBadGatewayWithoutLeakingInternalError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, nil, &fakeAnalyticsService{
+		stopBattleSimulationFn: func(ctx context.Context, req services.BattleSimulationStopRequest) (map[string]interface{}, error) {
+			return nil, io.ErrUnexpectedEOF
+		},
+	}, nil, 0, false, nil)
+	router := gin.New()
+	router.POST("/analytics/simulate/battle/stop", handler.StopBattleSimulation)
+
+	req := httptest.NewRequest(http.MethodPost, "/analytics/simulate/battle/stop", bytes.NewBufferString(`{"sessionId":"battle-1"}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["message"] != "analytics service request failed" {
+		t.Fatalf("unexpected body: %#v", body)
 	}
 }
 
