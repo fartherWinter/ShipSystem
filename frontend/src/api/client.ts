@@ -47,6 +47,11 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return resp.json() as Promise<T>;
 }
 
+type TrackQuery = {
+  start?: string;
+  end?: string;
+};
+
 export const api = {
   login: (username: string, password: string) =>
     request<LoginResponse>('/auth/login', {
@@ -63,7 +68,13 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
-  tracks: (shipId: number) => request<TrackListResponse>(`/ships/${shipId}/tracks`),
+  tracks: (shipId: number, filters: TrackQuery = {}) => {
+    const params = new URLSearchParams();
+    if (filters.start) params.set('start', filters.start);
+    if (filters.end) params.set('end', filters.end);
+    const query = params.toString();
+    return request<TrackListResponse>(`/ships/${shipId}/tracks${query ? `?${query}` : ''}`);
+  },
   alarms: (status = '') => request<AlarmPageResult>(`/alarms?status=${encodeURIComponent(status)}`),
   ackAlarm: (id: number) => request<Alarm>(`/alarms/${id}/ack`, { method: 'PUT', body: JSON.stringify({}) }),
   dispatchEvents: (status = '') => request<DispatchEventPageResult>(`/dispatch-events?status=${encodeURIComponent(status)}`),
@@ -101,8 +112,8 @@ export const api = {
   menus: () => request<MenuListResponse>('/rbac/menus'),
 };
 
-export async function startSimulator() {
-  const payload: SimulationStartRequest = { shipIds: [1, 2] };
+export async function startSimulator(shipIds: number[]) {
+  const payload: SimulationStartRequest = { shipIds };
   return request<AnalyticsProxyResponse>('/analytics/simulate/start', {
     method: 'POST',
     body: JSON.stringify(payload),

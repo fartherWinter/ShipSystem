@@ -6,6 +6,7 @@ import type { Ship } from '../types';
 
 export default function ShipsPage() {
   const [items, setItems] = useState<Ship[]>([]);
+  const [keyword, setKeyword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -14,11 +15,12 @@ export default function ShipsPage() {
   const [open, setOpen] = useState(false);
   const [form] = Form.useForm();
 
-  async function load() {
+  async function load(nextKeyword = keyword) {
+    const normalizedKeyword = nextKeyword.trim();
     setLoading(true);
     setError('');
     try {
-      const data = await api.ships();
+      const data = await api.ships(normalizedKeyword);
       setItems(data.items);
     } catch (err) {
       const text = err instanceof Error ? err.message : '加载船舶列表失败';
@@ -35,8 +37,15 @@ export default function ShipsPage() {
 
   function showModal(ship?: Ship) {
     setEditing(ship ?? null);
+    form.resetFields();
     form.setFieldsValue(ship ?? { status: 'active', flag: 'CN' });
     setOpen(true);
+  }
+
+  function closeModal() {
+    setOpen(false);
+    setEditing(null);
+    form.resetFields();
   }
 
   async function save() {
@@ -50,7 +59,7 @@ export default function ShipsPage() {
         await api.createShip(values);
         message.success('船舶已创建');
       }
-      setOpen(false);
+      closeModal();
       await load();
     } catch (err) {
       message.error(err instanceof Error ? err.message : '保存船舶失败');
@@ -76,14 +85,26 @@ export default function ShipsPage() {
     <div className="page-stack">
       <div className="page-toolbar">
         <h2>船舶管理</h2>
-        <Space>
-          <Button icon={<RefreshCw size={16} />} loading={loading} onClick={load} />
+        <Space wrap>
+          <Input.Search
+            allowClear
+            value={keyword}
+            placeholder="按船名或 MMSI 搜索"
+            style={{ width: 280 }}
+            onChange={(event) => setKeyword(event.target.value)}
+            onSearch={(value) => {
+              const nextKeyword = value.trim();
+              setKeyword(nextKeyword);
+              load(nextKeyword);
+            }}
+          />
+          <Button icon={<RefreshCw size={16} />} loading={loading} onClick={() => load()} />
           <Button type="primary" icon={<Plus size={16} />} onClick={() => showModal()}>
             新增船舶
           </Button>
         </Space>
       </div>
-      {error && <Alert type="error" showIcon message="船舶列表加载失败" description={error} action={<Button onClick={load}>重试</Button>} />}
+      {error && <Alert type="error" showIcon message="船舶列表加载失败" description={error} action={<Button onClick={() => load()}>重试</Button>} />}
       <Table
         rowKey="id"
         loading={loading}
@@ -117,7 +138,7 @@ export default function ShipsPage() {
         open={open}
         confirmLoading={saving}
         onOk={save}
-        onCancel={() => setOpen(false)}
+        onCancel={closeModal}
         destroyOnHidden
       >
         <Form form={form} layout="vertical">
