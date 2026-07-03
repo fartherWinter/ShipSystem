@@ -7,6 +7,7 @@ import LineString from 'ol/geom/LineString';
 import Point from 'ol/geom/Point';
 import TileLayer from 'ol/layer/Tile';
 import VectorLayer from 'ol/layer/Vector';
+import { isEmpty as isEmptyExtent } from 'ol/extent';
 import { fromLonLat } from 'ol/proj';
 import OSM from 'ol/source/OSM';
 import VectorSource from 'ol/source/Vector';
@@ -19,9 +20,17 @@ type Props = {
   battleUnits?: BattleUnit[];
   radarTargets?: RadarTarget[];
   projectiles?: BattleProjectile[];
+  fitMode?: 'center-first' | 'fit-data';
 };
 
-export default function MonitorMap({ locations = [], track = [], battleUnits = [], radarTargets = [], projectiles = [] }: Props) {
+export default function MonitorMap({
+  locations = [],
+  track = [],
+  battleUnits = [],
+  radarTargets = [],
+  projectiles = [],
+  fitMode = 'center-first',
+}: Props) {
   const nodeRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<OlMap | null>(null);
   const sourceRef = useRef(new VectorSource());
@@ -174,13 +183,27 @@ export default function MonitorMap({ locations = [], track = [], battleUnits = [
         }),
       );
     });
+    const firstProjectile = projectiles[0];
     const firstUnit = battleUnits[0];
     const firstTarget = radarTargets[0];
-    const first = locations[0] ?? track[0] ?? firstUnit ?? firstTarget;
-    if (first && mapRef.current) {
-      mapRef.current.getView().animate({ center: fromLonLat([first.longitude, first.latitude]), duration: 300 });
+    const first = locations[0] ?? track[0] ?? firstUnit ?? firstTarget ?? firstProjectile;
+    if (!first || !mapRef.current) {
+      return;
     }
-  }, [locations, track, battleUnits, radarTargets, projectiles]);
+    if (fitMode === 'fit-data') {
+      const extent = sourceRef.current.getExtent();
+      if (extent && !isEmptyExtent(extent)) {
+        mapRef.current.updateSize();
+        mapRef.current.getView().fit(extent, {
+          duration: 300,
+          padding: [48, 48, 48, 48],
+          maxZoom: 13,
+        });
+        return;
+      }
+    }
+    mapRef.current.getView().animate({ center: fromLonLat([first.longitude, first.latitude]), duration: 300 });
+  }, [locations, track, battleUnits, radarTargets, projectiles, fitMode]);
 
   return <div ref={nodeRef} className="monitor-map" />;
 }

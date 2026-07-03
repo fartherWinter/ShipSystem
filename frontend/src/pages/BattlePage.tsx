@@ -177,7 +177,7 @@ function LiveBattlePanel({
   return (
     <div className="battle-layout">
       <section className="battle-map-panel">
-        <MonitorMap battleUnits={units} radarTargets={radarTargets} projectiles={projectiles} />
+        <MonitorMap battleUnits={units} radarTargets={radarTargets} projectiles={projectiles} fitMode="fit-data" />
       </section>
       <aside className="battle-side-panel">
         <Space direction="vertical" size="middle" style={{ width: '100%' }}>
@@ -248,6 +248,7 @@ function BattleReplayPanel() {
   const [detailError, setDetailError] = useState('');
 
   const current = snapshots[index];
+  const tickIndexMap = useMemo(() => new Map(snapshots.map((item, itemIndex) => [item.tick, itemIndex])), [snapshots]);
 
   useEffect(() => {
     refreshSessions();
@@ -329,11 +330,26 @@ function BattleReplayPanel() {
     setIndex((prev) => Math.min(Math.max(prev + delta, 0), Math.max(snapshots.length - 1, 0)));
   }
 
+  function jumpToTick(tick: number) {
+    setPlaying(false);
+    const exactIndex = tickIndexMap.get(tick);
+    if (exactIndex !== undefined) {
+      setIndex(exactIndex);
+      return;
+    }
+    const closestIndex = snapshots.reduce(
+      (bestIndex, snapshot, snapshotIndex) =>
+        Math.abs(snapshot.tick - tick) < Math.abs(snapshots[bestIndex].tick - tick) ? snapshotIndex : bestIndex,
+      0,
+    );
+    setIndex(closestIndex);
+  }
+
   return (
     <div className="battle-replay-layout">
       <section className="battle-replay-map-panel">
         {current ? (
-          <MonitorMap battleUnits={current.units} radarTargets={current.radarTargets} projectiles={current.projectiles} />
+          <MonitorMap battleUnits={current.units} radarTargets={current.radarTargets} projectiles={current.projectiles} fitMode="fit-data" />
         ) : (
           <div className="battle-empty-panel">
             <Empty description="暂无回放快照" />
@@ -424,7 +440,7 @@ function BattleReplayPanel() {
           </Card>
 
           <BattleReportCard report={report} timeline={timeline} />
-          <TimelineCard timeline={timeline} currentTick={current?.tick} />
+          <TimelineCard timeline={timeline} currentTick={current?.tick} onSelectTick={jumpToTick} />
           <EventCard title="当前帧事件" events={current?.events ?? []} />
         </Space>
       </aside>
@@ -477,7 +493,15 @@ function BattleReportCard({ report, timeline }: { report: BattleReport | null; t
   );
 }
 
-function TimelineCard({ timeline, currentTick }: { timeline: BattleTimelineItem[]; currentTick?: number }) {
+function TimelineCard({
+  timeline,
+  currentTick,
+  onSelectTick,
+}: {
+  timeline: BattleTimelineItem[];
+  currentTick?: number;
+  onSelectTick: (tick: number) => void;
+}) {
   return (
     <Card title="时间轴摘要">
       <List
@@ -486,15 +510,27 @@ function TimelineCard({ timeline, currentTick }: { timeline: BattleTimelineItem[
         locale={{ emptyText: '暂无事件摘要' }}
         renderItem={(item) => (
           <List.Item className={item.tick === currentTick ? 'battle-current-tick' : undefined}>
-            <Space direction="vertical" size={2}>
-              <Space>
-                <Tag>Tick {item.tick}</Tag>
-                <Typography.Text type="secondary">{formatTime(item.snapshotTime)}</Typography.Text>
+            <button
+              type="button"
+              className="battle-timeline-entry"
+              onClick={() => onSelectTick(item.tick)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  onSelectTick(item.tick);
+                }
+              }}
+            >
+              <Space direction="vertical" size={2}>
+                <Space>
+                  <Tag>Tick {item.tick}</Tag>
+                  <Typography.Text type="secondary">{formatTime(item.snapshotTime)}</Typography.Text>
+                </Space>
+                {item.events.slice(0, 2).map((event, index) => (
+                  <Typography.Text key={`${item.tick}-${event.type}-${index}`}>{event.message}</Typography.Text>
+                ))}
               </Space>
-              {item.events.slice(0, 2).map((event, index) => (
-                <Typography.Text key={`${item.tick}-${event.type}-${index}`}>{event.message}</Typography.Text>
-              ))}
-            </Space>
+            </button>
           </List.Item>
         )}
       />

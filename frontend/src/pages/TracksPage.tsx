@@ -148,7 +148,7 @@ export default function TracksPage() {
         </Typography.Text>
       )}
       <div className="track-map">
-        <MonitorMap locations={track.slice(-1)} track={track} />
+        <MonitorMap locations={track.slice(-1)} track={track} fitMode="fit-data" />
       </div>
       <Table
         rowKey="id"
