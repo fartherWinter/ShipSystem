@@ -7,16 +7,19 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gorilla/websocket"
 	"gorm.io/gorm"
 
 	"shipsystem/backend/internal/config"
 	"shipsystem/backend/internal/middleware"
 	"shipsystem/backend/internal/models"
 	"shipsystem/backend/internal/services"
+	"shipsystem/backend/internal/ws"
 )
 
 type fakeAppService struct {
@@ -32,6 +35,7 @@ type fakeAppService struct {
 	createDispatchEventFn  func(ctx context.Context, event *models.DispatchEvent) error
 	listDispatchEventsFn   func(ctx context.Context, status string, page, size int) ([]models.DispatchEvent, int64, error)
 	updateDispatchStatusFn func(ctx context.Context, id uint, toStatus, remark string, operatorID *uint) (models.DispatchEvent, error)
+	listBattleScenariosFn  func(ctx context.Context) []services.BattleScenario
 	createBattleSessionFn  func(ctx context.Context, scenarioCode string) (models.BattleSession, services.BattleStateSnapshot, error)
 	listBattleSessionsFn   func(ctx context.Context, page, size int) ([]models.BattleSession, int64, error)
 	listUsersFn            func(ctx context.Context) ([]models.User, error)
@@ -61,6 +65,66 @@ type fakeAuthService struct {
 var _ authService = (*fakeAuthService)(nil)
 var _ appService = (*fakeAppService)(nil)
 var _ analyticsService = (*fakeAnalyticsService)(nil)
+
+func TestNewHandlerNormalizesAllowedOriginsAndWildcard(t *testing.T) {
+	handler := NewHandler(nil, nil, nil, nil, 0, false, []string{" https://ops.example ", "", "*"})
+
+	if _, ok := handler.allowedOrigins["https://ops.example"]; !ok {
+		t.Fatalf("expected trimmed origin to be registered: %#v", handler.allowedOrigins)
+	}
+	if !handler.allowAnyOrigin {
+		t.Fatal("expected wildcard origin to enable allowAnyOrigin")
+	}
+}
+
+func TestRegisterRoutesRegistersKeyEndpoints(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(&fakeAuthService{}, &fakeAppService{}, &fakeAnalyticsService{}, ws.NewHub(), 0, false, nil)
+	router := gin.New()
+
+	handler.RegisterRoutes(router)
+
+	seen := make(map[string]struct{})
+	for _, route := range router.Routes() {
+		seen[route.Method+" "+route.Path] = struct{}{}
+	}
+	for _, key := range []string{
+		"GET /ships",
+		"GET /battle/scenarios",
+		"POST /radar/reports",
+		"POST /analytics/simulate/battle/start",
+		"GET /rbac/menus",
+	} {
+		if _, ok := seen[key]; !ok {
+			t.Fatalf("expected route %s to be registered", key)
+		}
+	}
+}
+
+func TestCheckWSOriginHonorsBlankConfiguredAndWildcardOrigins(t *testing.T) {
+	handler := NewHandler(nil, nil, nil, nil, 0, false, []string{"https://ops.example"})
+	req := httptest.NewRequest(http.MethodGet, "/ws/monitor", nil)
+	if !handler.checkWSOrigin(req) {
+		t.Fatal("expected empty origin to be allowed")
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/ws/monitor", nil)
+	req.Header.Set("Origin", "https://ops.example")
+	if !handler.checkWSOrigin(req) {
+		t.Fatal("expected configured origin to be allowed")
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/ws/monitor", nil)
+	req.Header.Set("Origin", "https://evil.example")
+	if handler.checkWSOrigin(req) {
+		t.Fatal("expected unexpected origin to be rejected")
+	}
+
+	wildcard := NewHandler(nil, nil, nil, nil, 0, false, []string{"*"})
+	if !wildcard.checkWSOrigin(req) {
+		t.Fatal("expected wildcard handler to allow any origin")
+	}
+}
 
 func (f *fakeAuthService) Login(ctx context.Context, username, password string) (string, models.User, []models.Menu, error) {
 	if f.loginFn != nil {
@@ -182,6 +246,9 @@ func (f *fakeAppService) ListMenus(ctx context.Context) ([]models.Menu, error) {
 }
 
 func (f *fakeAppService) ListBattleScenarios(ctx context.Context) []services.BattleScenario {
+	if f.listBattleScenariosFn != nil {
+		return f.listBattleScenariosFn(ctx)
+	}
 	return nil
 }
 
@@ -642,6 +709,106 @@ func TestLoginReturnsInternalServerErrorWithoutLeakingInternalError(t *testing.T
 	}
 	body := decodeJSONBody(t, recorder)
 	if body["message"] != "failed to complete login" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
+func TestLoginSetsSecureCookieAndReturnsMenusOnSuccess(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(&fakeAuthService{
+		loginFn: func(ctx context.Context, username, password string) (string, models.User, []models.Menu, error) {
+			return "jwt-token", models.User{Username: "demo"}, []models.Menu{{ID: 1, Name: "Dashboard", Path: "/dashboard"}}, nil
+		},
+	}, nil, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.POST("/auth/login", handler.Login)
+
+	req := httptest.NewRequest(http.MethodPost, "/auth/login", bytes.NewBufferString(`{"username":"demo","password":"good"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Forwarded-Proto", "https")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["token"] != "jwt-token" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+	menus, ok := body["menus"].([]interface{})
+	if !ok || len(menus) != 1 {
+		t.Fatalf("unexpected menus: %#v", body["menus"])
+	}
+	setCookie := recorder.Header().Get("Set-Cookie")
+	if !strings.Contains(setCookie, middleware.TokenCookieName+"=jwt-token") {
+		t.Fatalf("expected auth cookie in header, got %q", setCookie)
+	}
+	if !strings.Contains(setCookie, "Max-Age=86400") {
+		t.Fatalf("expected default max age, got %q", setCookie)
+	}
+	if !strings.Contains(setCookie, "HttpOnly") || !strings.Contains(setCookie, "Secure") || !strings.Contains(setCookie, "SameSite=Lax") {
+		t.Fatalf("expected secure httponly lax cookie, got %q", setCookie)
+	}
+}
+
+func TestLogoutClearsSecureCookieAndReturnsNoContent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, nil, nil, nil, 0, true, nil)
+	router := gin.New()
+	router.POST("/auth/logout", handler.Logout)
+
+	req := httptest.NewRequest(http.MethodPost, "/auth/logout", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d", recorder.Code)
+	}
+	setCookie := recorder.Header().Get("Set-Cookie")
+	if !strings.Contains(setCookie, middleware.TokenCookieName+"=") {
+		t.Fatalf("expected auth cookie cleanup header, got %q", setCookie)
+	}
+	if !strings.Contains(setCookie, "Max-Age=0") {
+		t.Fatalf("expected cookie clear max age, got %q", setCookie)
+	}
+	if !strings.Contains(setCookie, "Secure") || !strings.Contains(setCookie, "HttpOnly") || !strings.Contains(setCookie, "SameSite=Lax") {
+		t.Fatalf("expected secure httponly lax cleanup cookie, got %q", setCookie)
+	}
+}
+
+func TestListBattleScenariosReturnsItems(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, &fakeAppService{
+		listBattleScenariosFn: func(ctx context.Context) []services.BattleScenario {
+			return []services.BattleScenario{
+				{
+					Code:            "open-water-duel",
+					Name:            "Open Water Duel",
+					Description:     "demo scenario",
+					OriginLongitude: 121.49,
+					OriginLatitude:  31.23,
+					BlueUnits:       1,
+					RedUnits:        1,
+					RadarRangeKm:    80,
+					WeaponRangeKm:   45,
+				},
+			}
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.GET("/battle/scenarios", handler.ListBattleScenarios)
+
+	req := httptest.NewRequest(http.MethodGet, "/battle/scenarios", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	items, ok := body["items"].([]interface{})
+	if !ok || len(items) != 1 {
 		t.Fatalf("unexpected body: %#v", body)
 	}
 }
@@ -1753,6 +1920,50 @@ func TestMonitorWSReturnsUnauthorizedWhenAuthTokenIsInvalid(t *testing.T) {
 	if body["message"] != "invalid auth token" {
 		t.Fatalf("unexpected body: %#v", body)
 	}
+}
+
+func TestMonitorWSSucceedsWithValidTokenAndTracksHubLifecycle(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	hub := ws.NewHub()
+	go hub.Run()
+
+	handler := NewHandler(&fakeAuthService{
+		parseTokenFn: func(tokenText string) (*services.Claims, error) {
+			return &services.Claims{Username: "demo"}, nil
+		},
+	}, nil, nil, hub, 0, false, []string{"http://127.0.0.1"})
+	router := gin.New()
+	router.GET("/ws/monitor", handler.MonitorWS)
+
+	server := httptest.NewServer(router)
+	defer server.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/ws/monitor?token=good-token"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, http.Header{"Origin": []string{"http://127.0.0.1"}})
+	if err != nil {
+		t.Fatalf("dial websocket: %v", err)
+	}
+
+	if !waitForActiveClients(hub, 1) {
+		t.Fatalf("expected one active websocket client, got %#v", hub.Stats())
+	}
+
+	if err := conn.Close(); err != nil {
+		t.Fatalf("close websocket: %v", err)
+	}
+	if !waitForActiveClients(hub, 0) {
+		t.Fatalf("expected websocket client to unregister after close, got %#v", hub.Stats())
+	}
+}
+
+func waitForActiveClients(hub *ws.Hub, expected int) bool {
+	for i := 0; i < 50; i++ {
+		if hub.Stats().ActiveClients == expected {
+			return true
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return hub.Stats().ActiveClients == expected
 }
 
 func decodeJSONBody(t *testing.T, recorder *httptest.ResponseRecorder) map[string]interface{} {
