@@ -171,7 +171,7 @@ def selected_checks(args: argparse.Namespace) -> list[Check]:
             ROOT / "frontend",
             hint=(
                 "On Windows sandboxed shells, Python subprocess may trigger Node EPERM while starting npm. "
-                "If that happens, run `cd frontend && npm run build` directly and keep its output with the preflight evidence."
+                "If that happens, run `cd frontend`, then `npm run build`, and keep its output with the preflight evidence."
             ),
             capture_output=os.name == "nt",
         ),
@@ -181,7 +181,7 @@ def selected_checks(args: argparse.Namespace) -> list[Check]:
             ROOT / "frontend",
             hint=(
                 "On Windows sandboxed shells, Python subprocess may trigger Node EPERM while starting npm. "
-                "If that happens, run `cd frontend && npm run test:e2e` directly and keep its output with the preflight evidence."
+                "If that happens, run `cd frontend`, then `npm run test:e2e`, and keep its output with the preflight evidence."
             ),
             capture_output=os.name == "nt",
         ),
@@ -319,7 +319,7 @@ def run_check(check: Check) -> float:
             direct_command = "npm run build" if check.name == "frontend build" else "npm run test:e2e"
             raise SystemExit(
                 f"[FAIL] {check.name} hit the known Windows/Codex Node realpath sandbox limitation; "
-                f"run `cd frontend && {direct_command}` directly and keep its output as the {check.name} evidence"
+                f"run `cd frontend`, then `{direct_command}`, and keep its output as the {check.name} evidence"
             )
         raise SystemExit(f"[FAIL] {check.name} failed after {elapsed:.1f}s with exit code {completed.returncode}")
     print(f"[ OK ] {check.name} ({elapsed:.1f}s)")
