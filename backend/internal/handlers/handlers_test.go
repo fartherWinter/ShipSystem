@@ -618,6 +618,78 @@ func TestListMenusReturnsInternalServerErrorWithoutLeakingStorageError(t *testin
 	}
 }
 
+func TestListUsersReturnsItemsOnSuccess(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, &fakeAppService{
+		listUsersFn: func(ctx context.Context) ([]models.User, error) {
+			return []models.User{{ID: 1, Username: "demo"}}, nil
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.GET("/rbac/users", handler.ListUsers)
+
+	req := httptest.NewRequest(http.MethodGet, "/rbac/users", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	items, ok := body["items"].([]interface{})
+	if !ok || len(items) != 1 {
+		t.Fatalf("unexpected items: %#v", body["items"])
+	}
+}
+
+func TestListRolesReturnsItemsOnSuccess(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, &fakeAppService{
+		listRolesFn: func(ctx context.Context) ([]models.Role, error) {
+			return []models.Role{{ID: 1, Code: "viewer", Name: "viewer"}}, nil
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.GET("/rbac/roles", handler.ListRoles)
+
+	req := httptest.NewRequest(http.MethodGet, "/rbac/roles", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	items, ok := body["items"].([]interface{})
+	if !ok || len(items) != 1 {
+		t.Fatalf("unexpected items: %#v", body["items"])
+	}
+}
+
+func TestListMenusReturnsItemsOnSuccess(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, &fakeAppService{
+		listMenusFn: func(ctx context.Context) ([]models.Menu, error) {
+			return []models.Menu{{ID: 1, Name: "Dashboard", Path: "/dashboard"}}, nil
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.GET("/rbac/menus", handler.ListMenus)
+
+	req := httptest.NewRequest(http.MethodGet, "/rbac/menus", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	items, ok := body["items"].([]interface{})
+	if !ok || len(items) != 1 {
+		t.Fatalf("unexpected items: %#v", body["items"])
+	}
+}
+
 func TestCreateShipReturnsValidationMessage(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	handler := NewHandler(nil, &fakeAppService{
@@ -662,6 +734,34 @@ func TestCreateShipReturnsInternalServerErrorWithoutLeakingStorageError(t *testi
 	}
 	body := decodeJSONBody(t, recorder)
 	if body["message"] != "failed to create ship" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
+func TestCreateShipReturnsCreatedShipOnSuccess(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, &fakeAppService{
+		createShipFn: func(ctx context.Context, ship *models.Ship) error {
+			if ship.Name != "Voyager" || ship.MMSI != "123456789" {
+				t.Fatalf("unexpected ship payload: %#v", ship)
+			}
+			ship.ID = 7
+			return nil
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.POST("/ships", handler.CreateShip)
+
+	req := httptest.NewRequest(http.MethodPost, "/ships", bytes.NewBufferString(`{"name":"Voyager","mmsi":"123456789"}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["id"] != float64(7) || body["name"] != "Voyager" {
 		t.Fatalf("unexpected body: %#v", body)
 	}
 }
@@ -875,6 +975,34 @@ func TestListTracksReturnsInternalServerErrorWithoutLeakingStorageError(t *testi
 	}
 }
 
+func TestListTracksReturnsTrackItemsOnSuccess(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	reportedAt := time.Date(2026, 7, 3, 9, 0, 0, 0, time.UTC)
+	handler := NewHandler(nil, &fakeAppService{
+		listTracksFn: func(ctx context.Context, shipID uint, start, end *time.Time) ([]models.ShipLocation, error) {
+			if shipID != 42 {
+				t.Fatalf("expected shipID 42, got %d", shipID)
+			}
+			return []models.ShipLocation{{ID: 1, ShipID: shipID, Longitude: 120.1, Latitude: 30.2, ReportedAt: reportedAt}}, nil
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.GET("/ships/:id/tracks", handler.ListTracks)
+
+	req := httptest.NewRequest(http.MethodGet, "/ships/42/tracks", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	items, ok := body["items"].([]interface{})
+	if !ok || len(items) != 1 {
+		t.Fatalf("unexpected items: %#v", body["items"])
+	}
+}
+
 func TestUpdateShipReturnsNotFoundWhenShipDoesNotExist(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	handler := NewHandler(nil, &fakeAppService{
@@ -1038,6 +1166,42 @@ func TestReportLocationReturnsInternalServerErrorWithoutLeakingStorageError(t *t
 	body := decodeJSONBody(t, recorder)
 	if body["message"] != "failed to report location" {
 		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
+func TestReportLocationReturnsCreatedLocationAndAlarmOnSuccess(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	reportedAt := time.Date(2026, 7, 3, 9, 5, 0, 0, time.UTC)
+	handler := NewHandler(nil, &fakeAppService{
+		reportLocationFn: func(ctx context.Context, loc *models.ShipLocation) (*models.Alarm, error) {
+			if loc.ShipID != 42 || loc.Longitude != 120.1 || loc.Latitude != 30.2 {
+				t.Fatalf("unexpected location payload: %#v", loc)
+			}
+			return &models.Alarm{ID: 9, Title: "overspeed"}, nil
+		},
+	}, nil, nil, 0, false, nil)
+	router := gin.New()
+	router.POST("/ships/:id/locations", handler.ReportLocation)
+
+	req := httptest.NewRequest(http.MethodPost, "/ships/42/locations", bytes.NewBufferString(`{"longitude":120.1,"latitude":30.2,"speedKnots":12.5,"course":90,"reportedAt":"2026-07-03T09:05:00Z"}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	location, ok := body["location"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("unexpected location body: %#v", body["location"])
+	}
+	if location["shipId"] != float64(42) || location["reportedAt"] != reportedAt.Format(time.RFC3339) {
+		t.Fatalf("unexpected location payload: %#v", location)
+	}
+	alarm, ok := body["alarm"].(map[string]interface{})
+	if !ok || alarm["id"] != float64(9) {
+		t.Fatalf("unexpected alarm payload: %#v", body["alarm"])
 	}
 }
 
@@ -1743,6 +1907,33 @@ func TestStartSimulationReturnsStructuredUpstreamError(t *testing.T) {
 	}
 }
 
+func TestStartSimulationAcceptsEmptyBodyAndReturnsSuccess(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, nil, &fakeAnalyticsService{
+		startSimulationFn: func(ctx context.Context, req services.SimulationStartRequest) (map[string]interface{}, error) {
+			if len(req.ShipIDs) != 0 {
+				t.Fatalf("expected empty shipIDs for empty body, got %#v", req)
+			}
+			return map[string]interface{}{"success": true}, nil
+		},
+	}, nil, 0, false, nil)
+	router := gin.New()
+	router.POST("/analytics/simulate/start", handler.StartSimulation)
+
+	req := httptest.NewRequest(http.MethodPost, "/analytics/simulate/start", http.NoBody)
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["success"] != true {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
 func TestStopSimulationReturnsBadGatewayWithoutLeakingInternalError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	handler := NewHandler(nil, nil, &fakeAnalyticsService{
@@ -1763,6 +1954,30 @@ func TestStopSimulationReturnsBadGatewayWithoutLeakingInternalError(t *testing.T
 	}
 	body := decodeJSONBody(t, recorder)
 	if body["message"] != "analytics service request failed" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
+func TestStopSimulationReturnsSuccess(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, nil, &fakeAnalyticsService{
+		stopSimulationFn: func(ctx context.Context) (map[string]interface{}, error) {
+			return map[string]interface{}{"success": true}, nil
+		},
+	}, nil, 0, false, nil)
+	router := gin.New()
+	router.POST("/analytics/simulate/stop", handler.StopSimulation)
+
+	req := httptest.NewRequest(http.MethodPost, "/analytics/simulate/stop", bytes.NewBufferString(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["success"] != true {
 		t.Fatalf("unexpected body: %#v", body)
 	}
 }
@@ -1829,6 +2044,33 @@ func TestStartBattleSimulationReturnsStructuredUpstreamError(t *testing.T) {
 	}
 }
 
+func TestStartBattleSimulationReturnsSuccess(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, nil, &fakeAnalyticsService{
+		startBattleSimulationFn: func(ctx context.Context, req services.BattleSimulationStartRequest) (map[string]interface{}, error) {
+			if req.SessionID != "battle-1" || req.ScenarioCode != "open-water-duel" {
+				t.Fatalf("unexpected request: %#v", req)
+			}
+			return map[string]interface{}{"requestId": "battle-start-1", "success": true}, nil
+		},
+	}, nil, 0, false, nil)
+	router := gin.New()
+	router.POST("/analytics/simulate/battle/start", handler.StartBattleSimulation)
+
+	req := httptest.NewRequest(http.MethodPost, "/analytics/simulate/battle/start", bytes.NewBufferString(`{"sessionId":"battle-1","scenarioCode":"open-water-duel","originLongitude":121.49,"originLatitude":31.23}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["success"] != true || body["requestId"] != "battle-start-1" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
 func TestStopBattleSimulationReturnsValidationMessage(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	handler := NewHandler(
@@ -1877,6 +2119,33 @@ func TestStopBattleSimulationReturnsBadGatewayWithoutLeakingInternalError(t *tes
 	}
 	body := decodeJSONBody(t, recorder)
 	if body["message"] != "analytics service request failed" {
+		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
+func TestStopBattleSimulationReturnsSuccess(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewHandler(nil, nil, &fakeAnalyticsService{
+		stopBattleSimulationFn: func(ctx context.Context, req services.BattleSimulationStopRequest) (map[string]interface{}, error) {
+			if req.SessionID != "battle-1" {
+				t.Fatalf("unexpected request: %#v", req)
+			}
+			return map[string]interface{}{"success": true}, nil
+		},
+	}, nil, 0, false, nil)
+	router := gin.New()
+	router.POST("/analytics/simulate/battle/stop", handler.StopBattleSimulation)
+
+	req := httptest.NewRequest(http.MethodPost, "/analytics/simulate/battle/stop", bytes.NewBufferString(`{"sessionId":"battle-1"}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+	body := decodeJSONBody(t, recorder)
+	if body["success"] != true {
 		t.Fatalf("unexpected body: %#v", body)
 	}
 }
