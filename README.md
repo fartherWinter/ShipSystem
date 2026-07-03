@@ -87,9 +87,27 @@ python scripts/preflight_check.py
 
 璇ュ懡浠や細椤哄簭鎵ц Go 鍚庣娴嬭瘯銆丳ython analytics 娴嬭瘯銆佽剼鏈崟鍏冩祴璇曘€佸墠绔敓浜ф瀯寤哄拰 Compose 闈欐€佸熀绾挎鏌ャ€傞渶瑕佸崟鐙帓閿欐椂锛屼篃鍙互鍒嗘鎵ц锛?
 ```bash
-cd backend && go test ./...
-cd analytics && uv run --with-requirements requirements.txt python -m unittest discover -s tests
-cd frontend && npm run build
+cd backend
+go test ./...
+```
+
+```bash
+cd analytics
+uv run --with-requirements requirements.txt python -m unittest discover -s tests
+```
+
+```bash
+cd frontend
+npm run build
+npm run test:e2e
+```
+
+```bash
+python scripts/preflight_check.py --only frontend-e2e
+python scripts/collect_release_evidence.py --continue-on-failure --include-frontend-e2e --output-dir .release-evidence/latest-frontend-e2e
+```
+
+```bash
 python -m unittest discover -s scripts_tests
 python scripts/check_compose_config.py
 python scripts/check_event_contract.py

@@ -22,7 +22,7 @@ python scripts/preflight_check.py
 - `python scripts/check_openapi_contract.py`
 - `python scripts/check_frontend_api_contract.py`
 - `python scripts/check_rbac_matrix.py`
-- `cd frontend && npm run test:e2e`
+- `cd frontend` then `npm run test:e2e`
 - `python scripts/preflight_check.py --only frontend-e2e`
 - `python scripts/collect_release_evidence.py --continue-on-failure --include-frontend-e2e --output-dir .release-evidence/latest-frontend-e2e`
 
