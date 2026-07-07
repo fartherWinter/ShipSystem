@@ -118,7 +118,15 @@ export default function AlarmsPage() {
           <Button icon={<RefreshCw size={16} />} loading={loading} onClick={() => void load(status, page, pageSize)} />
         </Space>
       </div>
-      {error && <Alert type="error" showIcon message="告警列表加载失败" description={error} action={<Button onClick={() => void load(status, page, pageSize)}>重试</Button>} />}
+      {error && (
+        <Alert
+          type="error"
+          showIcon
+          message="告警列表加载失败"
+          description={error}
+          action={<Button onClick={() => void load(status, page, pageSize)}>重试</Button>}
+        />
+      )}
       <Space direction="vertical" size={4}>
         <Typography.Text type="secondary">当前显示 {sortedItems.length} / {total} 条告警</Typography.Text>
         <Typography.Text type="secondary">最近刷新：{formatDateTime(lastUpdatedAt)}</Typography.Text>

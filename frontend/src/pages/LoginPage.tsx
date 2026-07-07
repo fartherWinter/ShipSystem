@@ -35,7 +35,7 @@ export default function LoginPage({ onLogin }: Props) {
           <Anchor size={30} />
           <div>
             <Typography.Title level={2}>船舶管理与监控调度系统</Typography.Title>
-            <Typography.Text type="secondary">默认账号 admin / Admin123!</Typography.Text>
+            <Typography.Text type="secondary">默认账号 `admin` / `Admin123!`</Typography.Text>
           </div>
         </div>
         {error && <Alert type="error" showIcon message="登录失败" description={error} className="login-alert" />}

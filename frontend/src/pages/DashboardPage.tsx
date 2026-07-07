@@ -113,9 +113,17 @@ export default function DashboardPage() {
     <div className="page-stack">
       <div className="page-toolbar">
         <Typography.Title level={3}>首页态势</Typography.Title>
-        <Button icon={<RefreshCw size={16} />} loading={loading} onClick={() => load()} />
+        <Button icon={<RefreshCw size={16} />} loading={loading} onClick={() => void load()} />
       </div>
-      {error && <Alert type="error" showIcon message="首页态势加载失败" description={error} action={<Button onClick={() => load()}>重试</Button>} />}
+      {error && (
+        <Alert
+          type="error"
+          showIcon
+          message="首页态势加载失败"
+          description={error}
+          action={<Button onClick={() => void load()}>重试</Button>}
+        />
+      )}
       <Typography.Text type="secondary">最近刷新：{formatDateTime(lastUpdatedAt)}</Typography.Text>
       <Row gutter={[16, 16]}>
         <Col xs={24} md={8}>

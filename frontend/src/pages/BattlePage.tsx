@@ -20,10 +20,7 @@ export default function BattlePage({ state, onStateChange }: Props) {
   const [scenarioError, setScenarioError] = useState('');
   const [stateError, setStateError] = useState('');
 
-  const scenario = useMemo(
-    () => scenarios.find((item) => item.code === scenarioCode) ?? scenarios[0],
-    [scenarioCode, scenarios],
-  );
+  const scenario = useMemo(() => scenarios.find((item) => item.code === scenarioCode) ?? scenarios[0], [scenarioCode, scenarios]);
 
   async function loadScenarios() {
     setScenarioLoading(true);
@@ -110,7 +107,7 @@ export default function BattlePage({ state, onStateChange }: Props) {
       setScenarioCode(runningSession.scenarioCode);
       await loadBattleState(runningSession.sessionId, { silent: true });
     } catch (err) {
-      const text = err instanceof Error ? err.message : '恢复运行中对战失败';
+      const text = err instanceof Error ? err.message : '恢复运行中的对战失败';
       setStateError(text);
       message.error(text);
     } finally {
@@ -143,7 +140,9 @@ export default function BattlePage({ state, onStateChange }: Props) {
   }
 
   async function stop() {
-    if (!state?.sessionId) return;
+    if (!state?.sessionId) {
+      return;
+    }
     setLoading(true);
     setStateError('');
     try {
@@ -159,7 +158,9 @@ export default function BattlePage({ state, onStateChange }: Props) {
   }
 
   async function refresh() {
-    if (!state?.sessionId) return;
+    if (!state?.sessionId) {
+      return;
+    }
     setLoading(true);
     setStateError('');
     try {
@@ -191,10 +192,10 @@ export default function BattlePage({ state, onStateChange }: Props) {
               scenarioError={scenarioError}
               stateError={stateError}
               onScenarioChange={setScenarioCode}
-              onReloadScenarios={loadScenarios}
-              onStart={start}
-              onStop={stop}
-              onRefresh={refresh}
+              onReloadScenarios={() => void loadScenarios()}
+              onStart={() => void start()}
+              onStop={() => void stop()}
+              onRefresh={() => void refresh()}
             />
           ),
         },
@@ -278,9 +279,11 @@ function LiveBattlePanel({
                 <Button danger icon={<Pause size={16} />} loading={loading} disabled={!state?.sessionId || !isRunning} onClick={onStop}>
                   停止
                 </Button>
-                <Button icon={<RefreshCw size={16} />} loading={loading} disabled={!state?.sessionId} onClick={onRefresh} />
+                <Button icon={<RefreshCw size={16} />} loading={loading} disabled={!state?.sessionId} onClick={onRefresh}>
+                  刷新
+                </Button>
               </Space>
-              <Space>
+              <Space wrap>
                 <Tag color={statusColor(state?.status)}>{state?.status ?? '未启动'}</Tag>
                 {state?.sessionId && <Typography.Text copyable>{state.sessionId}</Typography.Text>}
               </Space>
@@ -320,6 +323,8 @@ function BattleReplayPanel() {
   const [loading, setLoading] = useState(false);
   const [sessionsError, setSessionsError] = useState('');
   const [detailError, setDetailError] = useState('');
+  const [sessionsUpdatedAt, setSessionsUpdatedAt] = useState('');
+  const [detailLoadedAt, setDetailLoadedAt] = useState('');
 
   const current = snapshots[index];
   const tickIndexMap = useMemo(() => new Map(snapshots.map((item, itemIndex) => [item.tick, itemIndex])), [snapshots]);
@@ -340,11 +345,13 @@ function BattleReplayPanel() {
   }, [sessionKeyword, sessionStatusFilter, sessions]);
 
   useEffect(() => {
-    refreshSessions();
+    void refreshSessions();
   }, []);
 
   useEffect(() => {
-    if (!playing || snapshots.length <= 1) return;
+    if (!playing || snapshots.length <= 1) {
+      return;
+    }
     const interval = window.setInterval(() => {
       setIndex((prev) => {
         if (prev >= snapshots.length - 1) {
@@ -363,6 +370,7 @@ function BattleReplayPanel() {
     try {
       const items = await listAllBattleSessions();
       setSessions(items);
+      setSessionsUpdatedAt(new Date().toISOString());
       const sortedItems = [...items].sort((left, right) => compareBattleSessions(left, right));
       if ((!selectedSessionId || !sortedItems.some((item) => item.sessionId === selectedSessionId)) && sortedItems[0]) {
         await loadSession(sortedItems[0].sessionId);
@@ -391,6 +399,7 @@ function BattleReplayPanel() {
       setTimeline([...timelineRes.items].sort((left, right) => left.tick - right.tick));
       setSnapshots([...snapshotsRes.items].sort((left, right) => left.tick - right.tick));
       setReport(reportRes);
+      setDetailLoadedAt(new Date().toISOString());
     } catch (err) {
       const text = err instanceof Error ? err.message : '加载回放数据失败';
       setDetailError(text);
@@ -404,7 +413,9 @@ function BattleReplayPanel() {
   }
 
   function togglePlay() {
-    if (!snapshots.length) return;
+    if (!snapshots.length) {
+      return;
+    }
     if (playing) {
       setPlaying(false);
       return;
@@ -450,31 +461,36 @@ function BattleReplayPanel() {
         <Space direction="vertical" size="middle" style={{ width: '100%' }}>
           <Card
             title="历史对战"
-            extra={<Button icon={<RefreshCw size={16} />} loading={loading} onClick={refreshSessions} />}
+            extra={<Button icon={<RefreshCw size={16} />} loading={loading} onClick={() => void refreshSessions()} />}
           >
-            <Space wrap style={{ marginBottom: 12 }}>
-              <Input.Search
-                allowClear
-                value={sessionKeyword}
-                placeholder="搜索会话名、场景或 Session ID"
-                style={{ width: 240 }}
-                onChange={(event) => setSessionKeyword(event.target.value)}
-                onSearch={(value) => setSessionKeyword(value)}
-              />
-              <Select
-                allowClear
-                value={sessionStatusFilter || undefined}
-                placeholder="筛选状态"
-                style={{ width: 160 }}
-                options={[
-                  { label: '运行中', value: 'running' },
-                  { label: '蓝方胜利', value: 'blue_victory' },
-                  { label: '红方胜利', value: 'red_victory' },
-                  { label: '已停止', value: 'stopped' },
-                ]}
-                onChange={(value) => setSessionStatusFilter(value ?? '')}
-              />
-              <Typography.Text type="secondary">显示 {filteredSessions.length} / {sessions.length} 场</Typography.Text>
+            <Space direction="vertical" size={8} style={{ width: '100%', marginBottom: 12 }}>
+              <Space wrap>
+                <Input.Search
+                  allowClear
+                  value={sessionKeyword}
+                  placeholder="搜索会话名、场景或 Session ID"
+                  style={{ width: 240 }}
+                  onChange={(event) => setSessionKeyword(event.target.value)}
+                  onSearch={(value) => setSessionKeyword(value)}
+                />
+                <Select
+                  allowClear
+                  value={sessionStatusFilter || undefined}
+                  placeholder="筛选状态"
+                  style={{ width: 160 }}
+                  options={[
+                    { label: '运行中', value: 'running' },
+                    { label: '蓝方胜利', value: 'blue_victory' },
+                    { label: '红方胜利', value: 'red_victory' },
+                    { label: '已停止', value: 'stopped' },
+                  ]}
+                  onChange={(value) => setSessionStatusFilter(value ?? '')}
+                />
+              </Space>
+              <Space direction="vertical" size={2}>
+                <Typography.Text type="secondary">显示 {filteredSessions.length} / {sessions.length} 场</Typography.Text>
+                <Typography.Text type="secondary">最近刷新：{formatTime(sessionsUpdatedAt)}</Typography.Text>
+              </Space>
             </Space>
             {sessionsError && (
               <Alert
@@ -482,7 +498,7 @@ function BattleReplayPanel() {
                 showIcon
                 message="历史对战加载失败"
                 description={sessionsError}
-                action={<Button onClick={refreshSessions}>重试</Button>}
+                action={<Button onClick={() => void refreshSessions()}>重试</Button>}
                 style={{ marginBottom: 12 }}
               />
             )}
@@ -492,11 +508,7 @@ function BattleReplayPanel() {
               locale={{ emptyText: sessionsError ? '历史对战加载失败，请重试' : '暂无历史对战' }}
               renderItem={(item) => (
                 <List.Item>
-                  <Button
-                    block
-                    type={item.sessionId === selectedSessionId ? 'primary' : 'default'}
-                    onClick={() => loadSession(item.sessionId)}
-                  >
+                  <Button block type={item.sessionId === selectedSessionId ? 'primary' : 'default'} onClick={() => void loadSession(item.sessionId)}>
                     <span className="battle-session-button">
                       <span>
                         <Typography.Text>{item.name}</Typography.Text>
@@ -516,7 +528,7 @@ function BattleReplayPanel() {
               showIcon
               message="回放数据加载失败"
               description={detailError}
-              action={selectedSessionId ? <Button onClick={() => loadSession(selectedSessionId)}>重试</Button> : undefined}
+              action={selectedSessionId ? <Button onClick={() => void loadSession(selectedSessionId)}>重试</Button> : undefined}
             />
           )}
 
@@ -527,17 +539,8 @@ function BattleReplayPanel() {
                 <Button type="primary" icon={playing ? <Pause size={16} /> : <Play size={16} />} disabled={!snapshots.length} onClick={togglePlay}>
                   {playing ? '暂停' : '播放'}
                 </Button>
-                <Button
-                  icon={<ChevronRight size={16} />}
-                  disabled={!snapshots.length || index >= snapshots.length - 1}
-                  onClick={() => move(1)}
-                />
-                <Select
-                  value={speed}
-                  onChange={setSpeed}
-                  options={[0.5, 1, 2, 4].map((value) => ({ value, label: `${value}x` }))}
-                  style={{ width: 92 }}
-                />
+                <Button icon={<ChevronRight size={16} />} disabled={!snapshots.length || index >= snapshots.length - 1} onClick={() => move(1)} />
+                <Select value={speed} onChange={setSpeed} options={[0.5, 1, 2, 4].map((value) => ({ value, label: `${value}x` }))} style={{ width: 92 }} />
               </Space>
               <Slider
                 min={0}
@@ -549,9 +552,12 @@ function BattleReplayPanel() {
                   setIndex(Array.isArray(value) ? value[0] : value);
                 }}
               />
-              <Space>
-                <Tag>Tick {current?.tick ?? '-'}</Tag>
-                <Typography.Text type="secondary">{current ? formatTime(current.snapshotTime) : '暂无时间'}</Typography.Text>
+              <Space direction="vertical" size={2}>
+                <Space wrap>
+                  <Tag>Tick {current?.tick ?? '-'}</Tag>
+                  <Typography.Text type="secondary">{current ? formatTime(current.snapshotTime) : '暂无时间'}</Typography.Text>
+                </Space>
+                <Typography.Text type="secondary">最近载入：{formatTime(detailLoadedAt)}</Typography.Text>
               </Space>
             </Space>
           </Card>
@@ -599,9 +605,9 @@ function BattleReportCard({ report, timeline }: { report: BattleReport | null; t
             }}
           />
           <Space wrap>
-            <Button onClick={() => exportBattleReport(report, timeline, "json")}>导出 JSON</Button>
-            <Button onClick={() => exportBattleReport(report, timeline, "csv")}>导出 CSV</Button>
-            <Button onClick={() => exportBattleReport(report, timeline, "html")}>导出 HTML</Button>
+            <Button onClick={() => exportBattleReport(report, timeline, 'json')}>导出 JSON</Button>
+            <Button onClick={() => exportBattleReport(report, timeline, 'csv')}>导出 CSV</Button>
+            <Button onClick={() => exportBattleReport(report, timeline, 'html')}>导出 HTML</Button>
           </Space>
           <EventCard title="关键事件" events={report.keyEvents.slice(0, 8)} />
         </Space>
@@ -639,7 +645,7 @@ function TimelineCard({
               }}
             >
               <Space direction="vertical" size={2}>
-                <Space>
+                <Space wrap>
                   <Tag>Tick {item.tick}</Tag>
                   <Typography.Text type="secondary">{formatTime(item.snapshotTime)}</Typography.Text>
                 </Space>
@@ -657,7 +663,14 @@ function TimelineCard({
 
 function ForceCard({ title, color, units }: { title: string; color: 'blue' | 'red'; units: BattleUnit[] }) {
   return (
-    <Card title={<Space><Shield size={16} />{title}</Space>}>
+    <Card
+      title={
+        <Space>
+          <Shield size={16} />
+          {title}
+        </Space>
+      }
+    >
       <Space direction="vertical" size="small" style={{ width: '100%' }}>
         {units.length === 0 && <Typography.Text type="secondary">暂无单位</Typography.Text>}
         {units.map((unit) => {
@@ -667,10 +680,15 @@ function ForceCard({ title, color, units }: { title: string; color: 'blue' | 're
               <div>
                 <Typography.Text strong>{unit.name}</Typography.Text>
                 <Typography.Text type="secondary">
-                  {unit.status} / {unit.speedKnots.toFixed(1)} kt / {unit.course.toFixed(0)} deg
+                  {unit.status} / {unit.speedKnots.toFixed(1)} kt / {unit.course.toFixed(0)}°
                 </Typography.Text>
               </div>
-              <Progress percent={percent} size="small" status={unit.status === 'destroyed' ? 'exception' : 'active'} strokeColor={color === 'blue' ? '#2563eb' : '#dc2626'} />
+              <Progress
+                percent={percent}
+                size="small"
+                status={unit.status === 'destroyed' ? 'exception' : 'active'}
+                strokeColor={color === 'blue' ? '#2563eb' : '#dc2626'}
+              />
             </div>
           );
         })}
@@ -689,10 +707,8 @@ function EventCard({ title, events }: { title: string; events: BattleState['even
         renderItem={(item) => (
           <List.Item>
             <Space direction="vertical" size={2}>
-              <Space>
-                <Tag color={item.severity === 'CRITICAL' ? 'red' : item.severity === 'WARN' ? 'orange' : 'blue'}>
-                  {item.type}
-                </Tag>
+              <Space wrap>
+                <Tag color={item.severity === 'CRITICAL' ? 'red' : item.severity === 'WARN' ? 'orange' : 'blue'}>{item.type}</Tag>
                 <Typography.Text type="secondary">{formatTime(item.occurredAt)}</Typography.Text>
               </Space>
               <Typography.Text>{item.message}</Typography.Text>
@@ -705,38 +721,72 @@ function EventCard({ title, events }: { title: string; events: BattleState['even
 }
 
 function compareBattleSessions(left: BattleSession, right: BattleSession) {
-  if (left.status === 'running' && right.status !== 'running') return -1;
-  if (left.status !== 'running' && right.status === 'running') return 1;
+  if (left.status === 'running' && right.status !== 'running') {
+    return -1;
+  }
+  if (left.status !== 'running' && right.status === 'running') {
+    return 1;
+  }
   const leftTime = Date.parse(left.startedAt || left.createdAt);
   const rightTime = Date.parse(right.startedAt || right.createdAt);
-  if (Number.isNaN(leftTime) && Number.isNaN(rightTime)) return left.sessionId.localeCompare(right.sessionId);
-  if (Number.isNaN(leftTime)) return 1;
-  if (Number.isNaN(rightTime)) return -1;
+  if (Number.isNaN(leftTime) && Number.isNaN(rightTime)) {
+    return left.sessionId.localeCompare(right.sessionId);
+  }
+  if (Number.isNaN(leftTime)) {
+    return 1;
+  }
+  if (Number.isNaN(rightTime)) {
+    return -1;
+  }
   return rightTime - leftTime;
 }
 
 function statusColor(status?: string) {
-  if (status === 'running') return 'green';
-  if (status?.includes('victory')) return 'gold';
-  if (status === 'stopped') return 'default';
+  if (status === 'running') {
+    return 'green';
+  }
+  if (status?.includes('victory')) {
+    return 'gold';
+  }
+  if (status === 'stopped') {
+    return 'default';
+  }
   return 'blue';
 }
 
 function winnerLabel(value: string) {
-  if (value === 'blue') return '蓝方胜利';
-  if (value === 'red') return '红方胜利';
-  if (value === 'pending') return '进行中';
+  if (value === 'blue') {
+    return '蓝方胜利';
+  }
+  if (value === 'red') {
+    return '红方胜利';
+  }
+  if (value === 'pending') {
+    return '进行中';
+  }
   return '未决';
 }
 
-function exportBattleReport(report: BattleReport, timeline: BattleTimelineItem[], format: "json" | "csv" | "html") {
+function exportBattleReport(report: BattleReport, timeline: BattleTimelineItem[], format: 'json' | 'csv' | 'html') {
   const exported = buildBattleReportExport(report, timeline, format);
   downloadTextFile(battleReportDownloadFilename(report.session.sessionId, format), exported.text, exported.mimeType);
   message.success(`已导出战报 ${format.toUpperCase()}`);
 }
 
-function formatTime(value: string) {
+function formatTime(value?: string | null) {
+  if (!value) {
+    return '-';
+  }
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString();
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return date.toLocaleString('zh-CN', {
+    hour12: false,
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
 }
