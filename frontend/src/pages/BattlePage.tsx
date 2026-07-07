@@ -31,9 +31,12 @@ export default function BattlePage({ state, onStateChange }: Props) {
     try {
       const res = await api.battleScenarios();
       setScenarios(res.items);
-      if (res.items[0]) {
-        setScenarioCode(res.items[0].code);
-      }
+      setScenarioCode((current) => {
+        if (current && res.items.some((item) => item.code === current)) {
+          return current;
+        }
+        return res.items[0]?.code ?? current;
+      });
     } catch (err) {
       const text = err instanceof Error ? err.message : '加载对战场景失败';
       setScenarioError(text);
@@ -361,7 +364,7 @@ function BattleReplayPanel() {
       const items = await listAllBattleSessions();
       setSessions(items);
       const sortedItems = [...items].sort((left, right) => compareBattleSessions(left, right));
-      if (!selectedSessionId && sortedItems[0]) {
+      if ((!selectedSessionId || !sortedItems.some((item) => item.sessionId === selectedSessionId)) && sortedItems[0]) {
         await loadSession(sortedItems[0].sessionId);
       }
     } catch (err) {
@@ -385,8 +388,8 @@ function BattleReplayPanel() {
         api.battleSnapshots(sessionId),
         api.battleReport(sessionId),
       ]);
-      setTimeline(timelineRes.items);
-      setSnapshots(snapshotsRes.items);
+      setTimeline([...timelineRes.items].sort((left, right) => left.tick - right.tick));
+      setSnapshots([...snapshotsRes.items].sort((left, right) => left.tick - right.tick));
       setReport(reportRes);
     } catch (err) {
       const text = err instanceof Error ? err.message : '加载回放数据失败';

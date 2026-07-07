@@ -32,7 +32,7 @@ export default function AppShell({ currentPath, onNavigate, onLogout, user, wsSt
             <Typography.Text type="secondary">ShipSystem</Typography.Text>
           </div>
         </div>
-        <Menu mode="inline" selectedKeys={[currentPath]} items={items} onClick={(e) => onNavigate(e.key)} />
+        <Menu mode="inline" selectedKeys={[currentPath]} items={items} onClick={(event) => onNavigate(event.key)} />
       </Sider>
       <Layout>
         <Header className="app-header">
