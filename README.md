@@ -1,373 +1,221 @@
-# ShipSystem
+# ShipSystem 船舶管理与监控调度系统
 
-ShipSystem (船舶管理) is a training/demo simulation system for ship situational awareness. It is intentionally bounded to simulated or recorded data.
+ShipSystem 是一个面向船舶基础资料、实时位置、告警、调度事件、轨迹回放和雷达对战模拟的管理系统。当前仓库包含 Go 后端、Python analytics 服务、React 前端、PostgreSQL/PostGIS 数据库和本地发布检查脚本。
 
-Safety boundary:
+## 技术栈
 
-- No real weapon-control interface.
-- No real fire-control computation.
-- No real electronic-warfare or countermeasure device command.
-- No live radar integration in v1.
-- All abstract threat and response effects are training-only adjudications.
+| 模块 | 技术 |
+| --- | --- |
+| 后端 API | Go、Gin、GORM、JWT、WebSocket |
+| 数据库 | PostgreSQL、PostGIS、SQL migrations |
+| 分析服务 | Python、FastAPI、httpx、Pydantic |
+| 前端 | React、Vite、TypeScript、Ant Design、OpenLayers、lucide-react |
+| 交付 | Docker Compose、GitHub Actions、发布证据脚本 |
 
-## Components
+## 功能范围
 
-- Go backend in `cmd/sim-server`
-- Simulation engine in `internal/sim`
-- REST/WebSocket API in `internal/api`
-- PostgreSQL/PostGIS migrations in `migrations/001_init.sql` through `migrations/005_metrics_history.sql`
-- OpenAPI contract in `docs/openapi.json`
-- React/MapLibre training console in `web`
-- Docker/Compose packaging for small cloud deployments
+- 船舶管理：船舶列表、详情、新增、编辑、软删除。
+- 位置与轨迹：位置上报、最近位置展示、历史轨迹查询。
+- 告警中心：告警列表、告警确认和 WebSocket 实时告警。
+- 调度事件：调度创建、状态流转、调度事件实时更新。
+- 雷达对战：场景列表、会话创建、实时状态、时间线、快照和报告导出。
+- RBAC：`super_admin`、`admin`、`dispatcher`、`viewer`、`analytics_service` 角色。
+- 发布治理：OpenAPI、RBAC、WebSocket、analytics callback、前端 API、Compose 等静态契约检查。
 
-## Current Capabilities
+## 目录结构
 
-- Scenario workflow: built-in/file scenarios, managed database scenarios, JSON upload/copy/update, map-assisted sensor/zone authoring, reusable visual templates, assessment-rule form editing, enable/disable controls, client/server validation, version metadata, optional assessment profiles, and configurable record-completeness rules.
-- Run workflow: create, start, pause, stop, live WebSocket snapshots, snapshot replay, event audit, track history, training metadata, annotations, and archive state.
-- Training actions: abstract `maneuver`, `decoy`, and `training_response` actions with training-only adjudication and persisted audit records.
-- Review workflow: replay window navigation, event jump-to-nearest-frame, replay anchors, browser-local review bookmarks, replay quality hints, final track summaries, configurable abstract training-record assessment, and JSON/CSV/HTML/PDF report exports.
-- Operations workflow: memory or PostgreSQL/PostGIS storage, migration gate, retention preview/prune, run archive export, role-aware proxy auth with console access summary, capacity pressure metrics with per-run detail, health/readiness endpoints, JSON and Prometheus metrics, Docker/Compose packaging, and documented release checks.
-- Course workflow: file and managed course templates pair validated scenarios with expected metadata and report review checklists, then create managed scenarios through the console or API.
-
-See `docs/glossary.md` for product terminology, `docs/course-templates.md` for reusable exercise packages, `docs/proxy-identity-runbook.md` for proxy role deployment, and `docs/optimization-roadmap.md` for the product polish and improvement backlog.
-
-## Run Backend
-
-Memory mode:
-
-```powershell
-go run ./cmd/sim-server
+```text
+backend/        Go API、数据库迁移、领域服务、仓储和 WebSocket hub
+analytics/      Python FastAPI 模拟与回调服务
+frontend/       React 管理端、Playwright E2E、前端静态 gate
+docs/           OpenAPI、RBAC 矩阵、发布和运维文档
+scripts/        发布前检查、证据采集、运行时 smoke、备份恢复演练
+scripts_tests/  发布脚本的单元测试
+.github/        CI 和运维 gate 工作流
 ```
 
-Useful local configuration:
+## 快速启动
 
-```powershell
-$env:SHIP_SIM_SCENARIO_DIR="scenarios"
-$env:SHIP_SIM_COURSE_TEMPLATE_DIR="course-templates"
-$env:SHIP_SIM_REQUEST_BODY_LIMIT="1048576"
-```
+本地联调优先使用 Docker Compose。复制环境变量模板后，按环境补齐必要变量；不要把真实密钥、令牌、密码提交到仓库。
 
-Limit browser origins for local UI access:
-
-```powershell
-$env:SHIP_SIM_ALLOWED_ORIGINS="http://127.0.0.1:5173,http://localhost:5173"
-```
-
-PostgreSQL/PostGIS mode:
-
-```powershell
-$env:DATABASE_URL="postgres://user:password@localhost:5432/shipsim?sslmode=disable"
-go run ./cmd/sim-server
-```
-
-Apply the migrations in order before using PostgreSQL mode:
-
-```powershell
-psql $env:DATABASE_URL -f migrations/001_init.sql
-psql $env:DATABASE_URL -f migrations/002_snapshot_frames.sql
-psql $env:DATABASE_URL -f migrations/003_training_product.sql
-psql $env:DATABASE_URL -f migrations/004_course_templates.sql
-psql $env:DATABASE_URL -f migrations/005_metrics_history.sql
-```
-
-PostgreSQL mode has a startup migration gate. The app requires
-`schema_migrations.name='ship_sim'` to be at the current version before HTTP
-startup. Empty databases are treated as version `0`; databases with only
-`001_init.sql` are version `1`, databases migrated through
-`002_snapshot_frames.sql` are version `2`, and databases migrated through
-`003_training_product.sql` are version `3`, and `004_course_templates.sql`
-is version `4`. Apply `005_metrics_history.sql`
-to reach the current version.
-
-Production mode requires authentication:
-
-```powershell
-$env:SHIP_SIM_ENV="production"
-$env:SHIP_SIM_AUTH_MODE="token"
-$env:SHIP_SIM_AUTH_TOKEN="replace-with-a-secret"
-```
-
-Token auth is intended for demo or simple single-user deployments. It is not a
-multi-user production identity system. `SHIP_SIM_AUTH_MODE=proxy` is supported
-for OIDC/auth-proxy deployments; set `SHIP_SIM_AUTH_USER_HEADER` to the trusted
-user header from the proxy and optionally `SHIP_SIM_AUTH_ROLE_HEADER` to
-`viewer`, `operator`, `instructor`, or `admin`. If the proxy cannot send a role
-header, set `SHIP_SIM_AUTH_ROLE_MAP` with comma-separated `user=role` entries
-and optionally `SHIP_SIM_AUTH_DEFAULT_ROLE` for unmapped authenticated users.
-The reverse proxy must remove any incoming copy of those headers before setting
-them, and the application must not be exposed directly to the public internet in
-proxy-auth mode. When authentication is enabled, run listing and run-scoped APIs
-are limited to the authenticated token user or proxy user.
-
-`GET /api/session` returns the current auth mode, authenticated user, role, and
-role source plus descriptive permission flags. The React console uses it to show
-the active Access summary; backend authorization remains the source of truth for
-every mutation.
-
-Long-lived credentials are not accepted through the `access_token` query
-parameter. Browser report export uses authenticated `fetch` requests and Blob
-downloads so credentials stay in headers. WebSocket clients first request a
-short-lived one-time ticket from `POST /api/runs/{run_id}/ws-ticket`, then
-connect to `/ws/runs/{run_id}?ticket=...`; the ticket is bound to that run and
-is consumed on use.
-
-The HTTP server sets baseline security headers on all responses:
-`Content-Security-Policy`, `X-Content-Type-Options: nosniff`,
-`Referrer-Policy: no-referrer`, and `X-Frame-Options: DENY`.
-
-## Cloud Demo Deployment
-
-For a local Compose demo, copy `.env.local.example` to `.env` and start:
-
-```powershell
-Copy-Item .env.local.example .env
+```bash
+cp .env.example .env
+python scripts/runtime_precheck.py
 docker compose up --build
 ```
 
-The Compose defaults are development-oriented and use authentication off plus a
-local-only database password. Production deployments must use
-`.env.production.example` as a template, replace all placeholders with secret
-manager values, set a narrow `SHIP_SIM_ALLOWED_ORIGINS`, and choose token or
-proxy authentication explicitly. See `docs/deployment.md` for secret management,
-HTTP timeout, graceful shutdown, and Compose validation guidance.
+默认访问地址：
 
-The frontend uses Vite build-time settings for the browser API base,
-authentication prompt mode, and MapLibre raster tile source:
+- 前端：`http://localhost:3000`
+- Go API：`http://localhost:8080/api/v1`
+- analytics：`http://localhost:8090`
 
-```powershell
-$env:VITE_API_BASE="https://training.example.com"
-$env:VITE_AUTH_MODE="proxy"
-$env:VITE_MAP_TILE_URL="https://tiles.internal.example/{z}/{x}/{y}.png"
-$env:VITE_MAP_TILE_ATTRIBUTION="Internal training map tiles"
+登录账号和密码来自初始化数据与环境变量配置。生产环境必须通过环境变量或 secret manager 注入强值。
+
+## 本地开发
+
+后端：
+
+```bash
+cd backend
+go mod tidy
+go run ./cmd/api
 ```
 
-Set `VITE_MAP_TILE_URL` to a local or internal tile server before building when
-the deployment must run without public internet access. The UI displays a map
-error state if configured tiles cannot be loaded.
+analytics：
 
-The Compose file runs the app and PostGIS. The migrations are mounted into
-`/docker-entrypoint-initdb.d` and are applied when the database volume is first
-created. For an existing database, apply `migrations/001_init.sql` and then
-`migrations/002_snapshot_frames.sql`, `migrations/003_training_product.sql`,
-`migrations/004_course_templates.sql`, and `migrations/005_metrics_history.sql`
-manually.
-
-Run the optional Postgres integration test against an isolated test database:
-
-```powershell
-.\scripts\test-postgres.ps1
+```bash
+cd analytics
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8090
 ```
 
-See `docs/database.md` for database migration, backup/preview, and snapshot
-write reliability guidance.
+前端：
 
-CI/CD, release tagging, SBOM, and image scanning guidance is in
-`docs/release.md`.
-
-## API Quick Start
-
-```powershell
-$run = Invoke-RestMethod -Method Post -Uri http://localhost:8080/api/runs -ContentType application/json -Body '{}'
-Invoke-RestMethod -Method Post -Uri "http://localhost:8080/api/runs/$($run.id)/start"
-Invoke-RestMethod -Uri "http://localhost:8080/api/runs/$($run.id)/tracks"
+```bash
+cd frontend
+npm install
+npm run dev
 ```
 
-Submit an abstract training action:
+前端开发服务器默认监听 `5173`，并通过 Vite proxy 转发 `/api` 和 `/ws` 到 Go API。
 
-```powershell
-Invoke-RestMethod -Method Post -Uri "http://localhost:8080/api/runs/$($run.id)/actions" -ContentType application/json -Body '{"type":"training_response"}'
+## 配置原则
+
+- `APP_ENV=production` 时必须关闭自动迁移和演示数据种子。
+- 生产环境必须配置强 `JWT_SECRET`、`ADMIN_PASSWORD`、`ANALYTICS_ADMIN_TOKEN`、`GO_API_TOKEN`。
+- `GO_API_TOKEN` 只用于 analytics 回调 Go API，映射为 `analytics_service` 角色。
+- `ANALYTICS_ADMIN_TOKEN` 只用于 Go API 调用 analytics 管理接口。
+- `CORS_ORIGINS` 在生产环境不能使用通配符。
+- Go API 登录后设置 `shipsystem_token` HttpOnly Cookie；也支持 `Authorization: Bearer <JWT>`。
+- 生产环境 Cookie 会启用 `Secure`，部署层必须正确传递 HTTPS 代理头。
+
+## 数据库迁移
+
+Go API 使用 `backend/internal/database/migrations/*.sql` 作为应用内迁移来源，并写入 `schema_migrations` 表。生产发布建议显式执行迁移命令，而不是依赖启动时自动迁移。
+
+```bash
+cd backend
+go run ./cmd/migrate -action=status
+go run ./cmd/migrate -action=check
+go run ./cmd/migrate -action=up
 ```
 
-List recent runs and paged events:
+`backend/migrations/001_init.sql` 保留给 Docker Compose 首次初始化 PostgreSQL/PostGIS 使用。
 
-```powershell
-Invoke-RestMethod -Uri "http://localhost:8080/api/runs?limit=10"
-Invoke-RestMethod -Uri "http://localhost:8080/api/runs/$($run.id)/events?limit=20"
-Invoke-RestMethod -Uri "http://localhost:8080/api/runs/$($run.id)/track-points?limit=200"
+## API 与契约
+
+- REST 契约：`docs/openapi.yaml`
+- RBAC 矩阵：`docs/rbac_matrix.yaml`
+- OpenAPI 静态检查：`python scripts/check_openapi_contract.py`
+- 前端 API 覆盖检查：`python scripts/check_frontend_api_contract.py`
+- RBAC 矩阵检查：`python scripts/check_rbac_matrix.py`
+- WebSocket 事件契约检查：`python scripts/check_event_contract.py`
+- analytics callback 契约检查：`python scripts/check_callback_contract.py`
+
+主要 REST 入口：
+
+- `/api/v1/auth/login`
+- `/api/v1/auth/logout`
+- `/api/v1/ships`
+- `/api/v1/ships/{id}/locations`
+- `/api/v1/ships/{id}/tracks`
+- `/api/v1/alarms`
+- `/api/v1/dispatch-events`
+- `/api/v1/battle/scenarios`
+- `/api/v1/battle/sessions`
+- `/api/v1/radar/reports`
+- `/api/v1/analytics/simulate/*`
+- `/api/v1/rbac/*`
+
+## WebSocket
+
+监控 WebSocket 地址为 `/ws/monitor`。浏览器优先通过 Cookie 鉴权，也支持 Bearer token。当前事件类型必须同时在后端、前端类型和 README 中维护：
+
+- `ship_location_updated`
+- `alarm_created`
+- `dispatch_event_updated`
+- `radar_scan_updated`
+- `projectile_updated`
+- `battle_event_created`
+- `battle_state_updated`
+- `heartbeat`
+
+## 发布前检查
+
+最快的静态发布 gate：
+
+```bash
+python scripts/preflight_check.py
 ```
 
-Read snapshot replay frames and the nearest frame for a time:
+需要分步排查时：
 
-```powershell
-$frames = Invoke-RestMethod -Uri "http://localhost:8080/api/runs/$($run.id)/snapshots?limit=200"
-$at = [System.Uri]::EscapeDataString($frames[0].sampled_at)
-Invoke-RestMethod -Uri "http://localhost:8080/api/runs/$($run.id)/snapshots/nearest?at=$at"
+```bash
+cd backend
+go test ./...
 ```
 
-Build a training review report:
-
-```powershell
-Invoke-RestMethod -Uri "http://localhost:8080/api/runs/$($run.id)/report"
-Invoke-WebRequest -Uri "http://localhost:8080/api/runs/$($run.id)/report" -OutFile report.json
-Invoke-WebRequest -Uri "http://localhost:8080/api/runs/$($run.id)/report?format=csv" -OutFile report.csv
-Invoke-WebRequest -Uri "http://localhost:8080/api/runs/$($run.id)/report?format=html" -OutFile report.html
-Invoke-WebRequest -Uri "http://localhost:8080/api/runs/$($run.id)/report?format=pdf" -OutFile report.pdf
+```bash
+cd analytics
+uv run --with-requirements requirements.txt python -m unittest discover -s tests
 ```
 
-Export a completed run archive before retention pruning or cold-storage handoff:
-
-```powershell
-.\scripts\export-run-archive.ps1 -RunID $run.id
-.\scripts\export-run-archive.ps1 -RunID $run.id -Compress
+```bash
+python -m unittest discover -s scripts_tests
+python scripts/check_compose_config.py
+python scripts/check_event_contract.py
+python scripts/check_callback_contract.py
+python scripts/check_openapi_contract.py
+python scripts/check_frontend_api_contract.py
+python scripts/check_rbac_matrix.py
 ```
 
-Compressed archives can be uploaded through a pre-signed object-store URL:
-
-```powershell
-.\scripts\export-run-archive.ps1 -RunID $run.id -Compress -UploadUrl $env:SHIP_SIM_ARCHIVE_UPLOAD_URL
+```bash
+cd frontend
+npm run build
+npm run test:e2e
 ```
 
-Restore replay evidence from an archive into a PostgreSQL/PostGIS store:
+运行时 gate 需要本地栈或临时数据库环境，详见 `docs/release_runbook.md`：
 
-```powershell
-go run ./cmd/archive-restore -archive outputs/run-$($run.id)-archive.zip -database-url $env:DATABASE_URL
+```bash
+python scripts/runtime_precheck.py
+python scripts/smoke_check.py
+python scripts/run_runtime_observability_snapshot.py
+python scripts/run_repository_db_integration.py
+python scripts/run_backup_restore_drill.py
+python scripts/run_capacity_smoke.py --estimate-only
 ```
 
-Reports currently use `version: 2` and are intentionally limited to training
-summary plus audit data. They include duration, track totals, action counts,
-threat summary, final track states, event audit summary, event annotations,
-abstract training-record assessment, persisted audit logs, snapshot coverage
-(`from`, `to`, `count`, `average_interval_ms`), raw audit events, and the safety
-notice. Assessment is based on record completeness and replay coverage; it is
-not tactical advice, real fire-control data, or device-command guidance.
+## 发布证据
 
-Managed scenario and training record APIs:
+发布证据统一写入 `.release-evidence/`：
 
-```powershell
-$scenario = Get-Content scenarios/demo.json -Raw
-$saved = Invoke-RestMethod -Method Post -Uri http://localhost:8080/api/scenarios -ContentType application/json -Body $scenario
-Invoke-RestMethod -Method Post -Uri "http://localhost:8080/api/scenarios/$($saved.id)/copy" -ContentType application/json -Body '{"name":"demo-copy"}'
-Invoke-RestMethod -Method Post -Uri "http://localhost:8080/api/scenarios/$($saved.id)/disable"
-Invoke-RestMethod -Method Post -Uri "http://localhost:8080/api/scenarios/$($saved.id)/enable"
-Invoke-RestMethod -Method Put -Uri "http://localhost:8080/api/runs/$($run.id)/metadata" -ContentType application/json -Body '{"tags":["demo"],"trainees":["student-a"],"instructor_notes":"Training review only.","archived":false}'
-Invoke-RestMethod -Method Post -Uri "http://localhost:8080/api/runs/$($run.id)/annotations" -ContentType application/json -Body '{"note":"Instructor review note."}'
-Invoke-RestMethod -Uri "http://localhost:8080/api/runs/$($run.id)/audit"
+```bash
+python scripts/collect_release_evidence.py --output-dir .release-evidence/latest
 ```
 
-Reusable course templates are loaded from `course-templates/` and can also be
-stored as managed database templates. The console Course panel can create a
-managed scenario from the selected template. API usage:
+常用扩展项：
 
-```powershell
-Invoke-RestMethod -Uri http://localhost:8080/api/course-templates
-Invoke-RestMethod -Method Post -Uri http://localhost:8080/api/course-templates/quick-review-baseline/scenario
+```bash
+python scripts/collect_release_evidence.py --include-runtime --output-dir .release-evidence/latest-runtime
+python scripts/collect_release_evidence.py --include-frontend-e2e --skip-migration-status --skip-preflight --output-dir .release-evidence/latest-frontend-e2e
+python scripts/collect_release_evidence.py --include-backup-restore-drill --output-dir .release-evidence/latest-backup-drill
 ```
 
-Template scenarios, expected metadata, and review checklists remain
-training-only setup and audit aids; they are not tactical recommendations.
+CI 会采集静态 gate 和前端 E2E 证据；运维工作流会定期采集 runtime smoke、DB integration、备份恢复演练、runtime observability snapshot、retention preview 和 capacity estimate。
 
-New runs persist full snapshot frames for replay. Runs created before the
-snapshot migration still return reports with `replay_mode: "legacy"`; the UI
-keeps showing historical track lines and events, but exact state replay is not
-available for those older runs.
+## 文档索引
 
-Replay anchors can be copied from the console and opened later with:
+- `docs/production_audit.md`：生产级差距、风险和后续路线。
+- `docs/release_runbook.md`：发布、回滚、证据采集和排障流程。
+- `docs/operations_observability.md`：日志、告警、仪表盘和容量基线。
+- `docs/openapi.yaml`：REST API 契约。
+- `docs/rbac_matrix.yaml`：后端路由和前端页面角色矩阵。
 
-```text
-http://localhost:5173/?run=<run-id>&at=<RFC3339-time>
-```
+## 编码约定
 
-The console loads the run and jumps to the nearest persisted replay frame.
-Browser-local replay bookmarks are review conveniences; use annotations or
-instructor notes for evidence that must be preserved in reports.
-
-Readiness and scenarios:
-
-```powershell
-Invoke-RestMethod -Uri http://localhost:8080/readyz
-Invoke-RestMethod -Uri http://localhost:8080/api/scenarios
-Invoke-RestMethod -Method Post -Uri http://localhost:8080/api/runs -ContentType application/json -Body '{"scenario_id":"demo"}'
-```
-
-Runtime metrics:
-
-```powershell
-Invoke-RestMethod -Uri http://localhost:8080/metrics
-Invoke-WebRequest -Uri http://localhost:8080/metrics/prometheus
-```
-
-The metrics payload includes sample time, active/listed run counts, WebSocket
-connection count, total snapshot/event/track-point/contact counts, per-run
-count maps, capacity pressure for snapshots/events/track points, configured
-retention limits, snapshot write count/failures/latency, HTTP request
-counters/latency, engine counts, DB readiness, and backing-store table/index/
-total bytes where available. The console Capacity panel keeps a rolling trend
-window for growth, write latency, DB size, and archive-watch guidance.
-Prometheus format is available at `/metrics/prometheus`. See
-`docs/observability.md` for probe authentication and log field guidance.
-
-API contract:
-
-```powershell
-cd web
-npm run generate:types
-```
-
-The OpenAPI source is `docs/openapi.json`. Frontend API types are generated into
-`web/src/generated/api-types.ts` and re-exported through `web/src/types.ts`.
-See `docs/api.md` for report, scenario, run, snapshot versioning and API error
-code policy. See `docs/training-product.md` for scenario CRUD, run metadata,
-annotations, assessment, report templates, audit logs, and the training-only
-boundary.
-
-## Operations
-
-Apply PostgreSQL migrations in order: `001_init.sql` first, then
-`002_snapshot_frames.sql`, `003_training_product.sql`,
-`004_course_templates.sql`, and `005_metrics_history.sql`. Existing runs from
-before `002_snapshot_frames.sql` are not backfilled with snapshots; they remain
-available through legacy replay mode.
-
-Snapshot and audit retention is disabled by default:
-
-```powershell
-$env:SHIP_SIM_RETENTION_DAYS="0"
-$env:SHIP_SIM_RETENTION_INTERVAL="0s"
-$env:SHIP_SIM_MAX_TRACK_POINTS_PER_RUN="0"
-$env:SHIP_SIM_MAX_EVENTS_PER_RUN="0"
-$env:SHIP_SIM_MAX_SNAPSHOTS_PER_RUN="0"
-```
-
-Set `SHIP_SIM_RETENTION_DAYS` to prune events, contacts, track points, and
-snapshots older than that cutoff at server startup and every
-`SHIP_SIM_RETENTION_INTERVAL` when the interval is greater than zero. Set
-`SHIP_SIM_MAX_TRACK_POINTS_PER_RUN`, `SHIP_SIM_MAX_EVENTS_PER_RUN`, and
-`SHIP_SIM_MAX_SNAPSHOTS_PER_RUN` to keep only the newest rows per run. Use the
-preview API or operations script before a manual prune:
-
-```powershell
-Invoke-RestMethod -Uri "http://localhost:8080/api/retention/preview?days=30"
-Invoke-RestMethod -Method Post -Uri "http://localhost:8080/api/retention/prune" -ContentType application/json -Body '{"days":30}'
-.\scripts\retention.ps1 -Days 30
-```
-
-Manual retention also accepts `cutoff`, `ended_before`, and
-`max_track_points_per_run`, `max_events_per_run`, and
-`max_snapshots_per_run`. In token or proxy authentication mode, retention, run
-listing, run-scoped replay, report, event, track, and snapshot APIs are limited
-to the authenticated owner. See `docs/retention.md` for capacity estimates and
-the 5/20/100 track smoke script.
-
-Security notes:
-
-- Do not put long-lived API tokens in URLs. Use `Authorization: Bearer ...` or
-  `X-Ship-Sim-Token` for simple token deployments.
-- WebSocket access in authenticated deployments requires a one-time ticket from
-  the authenticated API.
-- Proxy-auth deployments require a trusted reverse proxy that overwrites and
-  sanitizes `SHIP_SIM_AUTH_USER_HEADER`; direct public exposure can let clients
-  spoof identity headers.
-- The system remains training-only. Do not add real weapon-control,
-  fire-control, electronic-warfare, or radar control integrations.
-
-API errors use a stable shape:
-
-```json
-{
-  "error": {
-    "code": "validation_failed",
-    "message": "validation failed",
-    "details": ["tick_hz must be between 1 and 60"]
-  }
-}
-```
+所有文档使用 UTF-8 保存，中文直接写入源码，不使用 Unicode escape。Windows 终端查看中文时如出现乱码，优先确认终端输出编码，而不是把文件转成 GBK。

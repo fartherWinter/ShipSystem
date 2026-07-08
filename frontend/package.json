@@ -1,0 +1,34 @@
+{
+  "name": "shipsystem-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "generate:types": "python ../scripts/generate_frontend_api_types.py",
+    "typecheck": "npm run generate:types && tsc -b",
+    "build": "npm run test:static && npm run typecheck && npm run check:routes && vite build && npm run check:bundle",
+    "check:bundle": "node ./scripts/check_frontend_bundle.mjs",
+    "check:routes": "node ./scripts/check_frontend_routes.mjs",
+    "test:e2e": "npx playwright test",
+    "test:static": "node --test scripts_tests/frontend_gate_scripts.test.mjs scripts_tests/battle_report_export.test.mjs",
+    "preview": "vite preview --host 0.0.0.0"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^5.1.1",
+    "antd": "^6.0.2",
+    "lucide-react": "^0.561.0",
+    "ol": "^10.8.0",
+    "react": "^19.2.1",
+    "react-dom": "^19.2.1",
+    "react-router-dom": "^7.17.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.1",
+    "@types/node": "^25.9.2",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "typescript": "^5.9.3",
+    "vite": "^7.2.6"
+  }
+}

@@ -1,0 +1,112 @@
+version: 1
+roles:
+  - super_admin
+  - admin
+  - dispatcher
+  - viewer
+  - analytics_service
+rest:
+  - method: GET
+    path: /ships
+    roles: [admin, dispatcher, viewer]
+  - method: POST
+    path: /ships
+    roles: [admin]
+  - method: GET
+    path: /ships/{id}
+    roles: [admin, dispatcher, viewer]
+  - method: PUT
+    path: /ships/{id}
+    roles: [admin]
+  - method: DELETE
+    path: /ships/{id}
+    roles: [admin]
+  - method: POST
+    path: /ships/{id}/locations
+    roles: [admin, dispatcher, analytics_service]
+  - method: GET
+    path: /ships/{id}/tracks
+    roles: [admin, dispatcher, viewer]
+  - method: GET
+    path: /alarms
+    roles: [admin, dispatcher, viewer]
+  - method: PUT
+    path: /alarms/{id}/ack
+    roles: [admin, dispatcher]
+  - method: GET
+    path: /dispatch-events
+    roles: [admin, dispatcher, viewer]
+  - method: POST
+    path: /dispatch-events
+    roles: [admin, dispatcher]
+  - method: PUT
+    path: /dispatch-events/{id}/status
+    roles: [admin, dispatcher]
+  - method: GET
+    path: /battle/scenarios
+    roles: [admin, dispatcher, viewer]
+  - method: GET
+    path: /battle/sessions
+    roles: [admin, dispatcher, viewer]
+  - method: POST
+    path: /battle/sessions
+    roles: [admin, dispatcher]
+  - method: GET
+    path: /battle/sessions/{sessionId}/timeline
+    roles: [admin, dispatcher, viewer]
+  - method: GET
+    path: /battle/sessions/{sessionId}/snapshots
+    roles: [admin, dispatcher, viewer]
+  - method: GET
+    path: /battle/sessions/{sessionId}/report
+    roles: [admin, dispatcher, viewer]
+  - method: GET
+    path: /battle/sessions/{sessionId}/state
+    roles: [admin, dispatcher, viewer]
+  - method: POST
+    path: /battle/sessions/{sessionId}/stop
+    roles: [admin, dispatcher]
+  - method: POST
+    path: /radar/reports
+    roles: [admin, dispatcher, analytics_service]
+  - method: GET
+    path: /analytics/simulate/status
+    roles: [admin, dispatcher]
+  - method: POST
+    path: /analytics/simulate/start
+    roles: [admin, dispatcher]
+  - method: POST
+    path: /analytics/simulate/stop
+    roles: [admin, dispatcher]
+  - method: POST
+    path: /analytics/simulate/battle/start
+    roles: [admin, dispatcher]
+  - method: POST
+    path: /analytics/simulate/battle/stop
+    roles: [admin, dispatcher]
+  - method: GET
+    path: /rbac/users
+    roles: [super_admin]
+  - method: GET
+    path: /rbac/roles
+    roles: [super_admin]
+  - method: GET
+    path: /rbac/menus
+    roles: [super_admin]
+frontend:
+  - path: /dashboard
+    roles: [super_admin, admin, dispatcher, viewer]
+  - path: /ships
+    roles: [super_admin, admin, dispatcher, viewer]
+  - path: /monitor
+    roles: [super_admin, admin, dispatcher, viewer]
+  - path: /battle
+    roles: [super_admin, admin, dispatcher, viewer]
+  - path: /tracks
+    roles: [super_admin, admin, dispatcher, viewer]
+  - path: /alarms
+    roles: [super_admin, admin, dispatcher, viewer]
+  - path: /dispatch
+    roles: [super_admin, admin, dispatcher]
+  - path: /rbac
+    roles: [super_admin]

@@ -1,60 +1,92 @@
 services:
-  app:
-    build:
-      context: .
-      args:
-        FRONTEND_API_BASE: ${VITE_API_BASE:-}
-        FRONTEND_MODE: ${VITE_AUTH_MODE:-}
-        FRONTEND_MAP_TILE_URL: ${VITE_MAP_TILE_URL:-}
-        FRONTEND_MAP_TILE_ATTRIBUTION: ${VITE_MAP_TILE_ATTRIBUTION:-}
-    depends_on:
-      db:
-        condition: service_healthy
+  postgres:
+    image: postgis/postgis:17-3.5
     environment:
-      SHIP_SIM_ENV: ${SHIP_SIM_ENV:-development}
-      SHIP_SIM_ADDR: ${SHIP_SIM_ADDR:-:8080}
-      SHIP_SIM_DATABASE_URL: ${SHIP_SIM_DATABASE_URL:-postgres://${POSTGRES_USER:-shipsim}:${POSTGRES_PASSWORD:-shipsim-local-dev-only}@db:5432/${POSTGRES_DB:-shipsim}?sslmode=disable}
-      SHIP_SIM_ALLOWED_ORIGINS: ${SHIP_SIM_ALLOWED_ORIGINS:-http://localhost:8080}
-      SHIP_SIM_AUTH_MODE: ${SHIP_SIM_AUTH_MODE:-off}
-      SHIP_SIM_AUTH_TOKEN: ${SHIP_SIM_AUTH_TOKEN:-}
-      SHIP_SIM_AUTH_USER_HEADER: ${SHIP_SIM_AUTH_USER_HEADER:-X-Forwarded-User}
-      SHIP_SIM_AUTH_ROLE_HEADER: ${SHIP_SIM_AUTH_ROLE_HEADER:-X-Forwarded-Role}
-      SHIP_SIM_AUTH_DEFAULT_ROLE: ${SHIP_SIM_AUTH_DEFAULT_ROLE:-}
-      SHIP_SIM_AUTH_ROLE_MAP: ${SHIP_SIM_AUTH_ROLE_MAP:-}
-      SHIP_SIM_STATIC_DIR: ${SHIP_SIM_STATIC_DIR:-/app/web}
-      SHIP_SIM_SCENARIO_DIR: ${SHIP_SIM_SCENARIO_DIR:-/app/scenarios}
-      SHIP_SIM_COURSE_TEMPLATE_DIR: ${SHIP_SIM_COURSE_TEMPLATE_DIR:-/app/course-templates}
-      SHIP_SIM_REQUEST_BODY_LIMIT: ${SHIP_SIM_REQUEST_BODY_LIMIT:-1048576}
-      SHIP_SIM_RETENTION_DAYS: ${SHIP_SIM_RETENTION_DAYS:-0}
-      SHIP_SIM_RETENTION_INTERVAL: ${SHIP_SIM_RETENTION_INTERVAL:-0s}
-      SHIP_SIM_MAX_TRACK_POINTS_PER_RUN: ${SHIP_SIM_MAX_TRACK_POINTS_PER_RUN:-0}
-      SHIP_SIM_MAX_EVENTS_PER_RUN: ${SHIP_SIM_MAX_EVENTS_PER_RUN:-0}
-      SHIP_SIM_MAX_SNAPSHOTS_PER_RUN: ${SHIP_SIM_MAX_SNAPSHOTS_PER_RUN:-0}
-      SHIP_SIM_HTTP_READ_TIMEOUT: ${SHIP_SIM_HTTP_READ_TIMEOUT:-10s}
-      SHIP_SIM_HTTP_READ_HEADER_TIMEOUT: ${SHIP_SIM_HTTP_READ_HEADER_TIMEOUT:-5s}
-      SHIP_SIM_HTTP_WRITE_TIMEOUT: ${SHIP_SIM_HTTP_WRITE_TIMEOUT:-30s}
-      SHIP_SIM_HTTP_IDLE_TIMEOUT: ${SHIP_SIM_HTTP_IDLE_TIMEOUT:-60s}
-      SHIP_SIM_SHUTDOWN_TIMEOUT: ${SHIP_SIM_SHUTDOWN_TIMEOUT:-15s}
-      SHIP_SIM_SNAPSHOT_WRITE_TIMEOUT: ${SHIP_SIM_SNAPSHOT_WRITE_TIMEOUT:-5s}
+      POSTGRES_DB: shipsystem
+      POSTGRES_USER: shipsystem
+      POSTGRES_PASSWORD: shipsystem
+      TZ: Asia/Shanghai
     ports:
-      - "8080:8080"
-    restart: unless-stopped
-
-  db:
-    image: postgis/postgis:16-3.4
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB:-shipsim}
-      POSTGRES_USER: ${POSTGRES_USER:-shipsim}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-shipsim-local-dev-only}
+      - "5432:5432"
     volumes:
-      - ship-sim-db:/var/lib/postgresql/data
-      - ./migrations:/docker-entrypoint-initdb.d:ro
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/migrations:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-shipsim} -d ${POSTGRES_DB:-shipsim}"]
+      test: ["CMD-SHELL", "pg_isready -U shipsystem -d shipsystem"]
       interval: 10s
       timeout: 5s
-      retries: 10
-    restart: unless-stopped
+      retries: 5
+
+  backend:
+    build: ./backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      PORT: 8080
+      DATABASE_DSN: host=postgres user=shipsystem password=shipsystem dbname=shipsystem port=5432 sslmode=disable TimeZone=Asia/Shanghai
+      DATABASE_AUTO_MIGRATE: ${DATABASE_AUTO_MIGRATE:-true}
+      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-true}
+      ANALYTICS_BASE_URL: http://analytics:8090
+      ANALYTICS_ADMIN_TOKEN: ${ANALYTICS_ADMIN_TOKEN:-}
+      GO_API_TOKEN: ${GO_API_TOKEN:-}
+      ANALYTICS_HTTP_TIMEOUT: ${ANALYTICS_HTTP_TIMEOUT:-10s}
+      REQUEST_BODY_LIMIT_BYTES: ${REQUEST_BODY_LIMIT_BYTES:-1048576}
+      HTTP_READ_TIMEOUT: ${HTTP_READ_TIMEOUT:-15s}
+      HTTP_READ_HEADER_TIMEOUT: ${HTTP_READ_HEADER_TIMEOUT:-5s}
+      HTTP_WRITE_TIMEOUT: ${HTTP_WRITE_TIMEOUT:-30s}
+      HTTP_IDLE_TIMEOUT: ${HTTP_IDLE_TIMEOUT:-60s}
+      HTTP_SHUTDOWN_TIMEOUT: ${HTTP_SHUTDOWN_TIMEOUT:-10s}
+      JWT_SECRET: ${JWT_SECRET:-dev-only-change-me}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Admin123!}
+      JWT_TTL_HOURS: ${JWT_TTL_HOURS:-24}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost:3000,http://localhost}
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/ready >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  analytics:
+    build: ./analytics
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      GO_API_BASE: http://backend:8080/api/v1
+      GO_API_TOKEN: ${GO_API_TOKEN:-}
+      ANALYTICS_ADMIN_TOKEN: ${ANALYTICS_ADMIN_TOKEN:-}
+      SIM_INTERVAL_SECONDS: ${SIM_INTERVAL_SECONDS:-3}
+      BATTLE_INTERVAL_SECONDS: ${BATTLE_INTERVAL_SECONDS:-1.2}
+      HTTP_RETRY_ATTEMPTS: ${HTTP_RETRY_ATTEMPTS:-3}
+      HTTP_TIMEOUT_SECONDS: ${HTTP_TIMEOUT_SECONDS:-10}
+      HTTP_RETRY_BACKOFF_SECONDS: ${HTTP_RETRY_BACKOFF_SECONDS:-0.2}
+      HTTP_RETRY_BACKOFF_MAX_SECONDS: ${HTTP_RETRY_BACKOFF_MAX_SECONDS:-2}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost:3000,http://localhost}
+    ports:
+      - "8090:8090"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8090/health', timeout=3).read()\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  frontend:
+    build: ./frontend
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "3000:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/ >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 volumes:
-  ship-sim-db:
+  postgres_data:
